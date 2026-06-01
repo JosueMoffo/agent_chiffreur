@@ -240,7 +240,7 @@ curl -s -X POST http://localhost:5004/vm/session/register \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
     "vm_id": 101,
-    "public_key": "a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890"
+    "vm_pub_key_hex": "a1b2c3d4e5f67890123456789012345678901234567890123456789012345678"
   }'
 
 # 3. Chiffrer
@@ -313,10 +313,12 @@ Format erreur :
 
 ## 9. Simulation intégrée
 
-Pour exécuter tous les scénarios HTTP automatisés :
+Pour exécuter tous les scénarios HTTP automatisés (serveur local dédié, hors production) :
 
 ```bash
-cargo run --release --bin simulation_tests
+./Simulation.sh
 ```
+
+Équivalent manuel : `cargo build --release --bin simulation_tests && ./target/release/simulation_tests`
 
 Voir aussi : [Guide_des_secrets.md](Guide_des_secrets.md), [README.md](README.md).

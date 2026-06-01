@@ -17,7 +17,7 @@
 //!   "seuil_entropie": 256,
 //!   "chemin_session": "data/session.json",
 //!   "agent_auditeur_url": null,
-//!   "agents_connus": { "Decideur": "http://localhost:8401" }
+//!   "agents_connus": { "Decideur": "http://localhost:5003" }
 //! }
 //! ```
 

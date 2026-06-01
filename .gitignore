@@ -7,3 +7,4 @@ data/*.json
 /target/
 .cursor
 **/*.rs.bk
+Cargo.lock

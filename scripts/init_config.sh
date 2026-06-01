@@ -89,7 +89,7 @@ config = {
     "chemin_session": "data/session.json",
     "agent_auditeur_url": None,
     "agents_connus": {
-        "Decideur": "http://localhost:8401",
+        "Decideur": "http://localhost:5003",
         "auditeur":  "http://localhost:8500"
     }
 }
