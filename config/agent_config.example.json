@@ -1,0 +1,17 @@
+{
+  "_commentaire": "Fichier de configuration Agent Chiffreur ENSPY — NE PAS COMMITTER agent_config.json",
+  "_instructions": "Copier vers agent_config.json et exécuter bash scripts/init_config.sh",
+  "agent_port": 5004,
+  "agent_token": "REMPLACER_PAR_TOKEN_ALEATOIRE_64_HEX",
+  "intervalle_rotation_sec": 300,
+  "old_key_grace_sec": 60,
+  "agent_rotation_autorise": "Decideur",
+  "intervalle_supervision_sec": 10,
+  "seuil_entropie": 256,
+  "chemin_session": "data/session.json",
+  "agent_auditeur_url": null,
+  "agents_connus": {
+    "Decideur": "http://localhost:8401",
+    "auditeur": "http://localhost:8500"
+  }
+}

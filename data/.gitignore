@@ -1,0 +1,5 @@
+# Sessions VM et blobs — contiennent des clés AES — ne jamais versionner
+session.json
+blobs_store.json
+sim_*.json
+*.json

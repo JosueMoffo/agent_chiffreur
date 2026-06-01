@@ -1,0 +1,46 @@
+{
+  "_commentaire": "Métadonnées des scénarios — pas de clés statiques ; les clés sont générées à l'exécution",
+  "agent_token_test": "ENSPY-TOKEN-2026",
+  "agent_rotation_autorise": "Decideur",
+  "port_simulation": 15004,
+  "old_key_grace_sec_test": 3,
+  "chemin_session_test": "data/sim_session.json",
+  "chemin_sim_blobs": "data/sim_blobs.json",
+  "chemin_blobs_agent": "data/sim_agent_blobs.json",
+  "vms_a_enregistrer": [
+    {
+      "vm_id": 101,
+      "description": "VM Linux — url_notification présente",
+      "url_notification": "http://127.0.0.1:19001/key-update"
+    },
+    {
+      "vm_id": 102,
+      "description": "VM Windows — notification",
+      "url_notification": "http://127.0.0.1:19002/key-update"
+    },
+    {
+      "vm_id": 103,
+      "description": "VM sans notification HTTP",
+      "url_notification": null
+    }
+  ],
+  "scenarios_acces_rotation": [
+    {
+      "id": "I-ok",
+      "agent_name": "Decideur",
+      "attendu_http": 200
+    },
+    {
+      "id": "I-intrus",
+      "agent_name": "intrus",
+      "attendu_http": 403,
+      "error_code": "FORBIDDEN"
+    },
+    {
+      "id": "I-vide",
+      "agent_name": "",
+      "attendu_http": 403,
+      "error_code": "FORBIDDEN"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+[package]
+name = "agent_chiffreur"
+version = "1.2.0"
+edition = "2021"
+authors = ["ENSPY SMA 2025-2026"]
+description = "Agent Chiffreur — Racine de confiance cryptographique du SMA ENSPY"
+license = "MIT"
+
+[lib]
+name = "agent_chiffreur"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agent_chiffreur"
+path = "src/main.rs"
+
+[[bin]]
+name = "simulation_tests"
+path = "src/simulation_tests.rs"
+
+[dependencies]
+aes-gcm       = "0.10"
+x25519-dalek  = { version = "2", features = ["static_secrets"] }
+argon2        = "0.5"
+base64        = "0.22"
+rand          = "0.8"
+rand_core     = { version = "0.6", features = ["getrandom"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+axum          = { version = "0.7", features = ["json"] }
+tokio         = { version = "1", features = ["full"] }
+tower         = "0.4"
+reqwest       = { version = "0.12", features = ["json"] }
+hex           = "0.4"
+uuid          = { version = "1", features = ["v4"] }
+chrono        = { version = "0.4", features = ["serde"] }
+tracing       = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zeroize       = { version = "1", features = ["derive"] }
+thiserror     = "1"
+anyhow        = "1"
+sysinfo       = "0.30"
+# Lecture fichier .env
+dotenvy       = "0.15"
+# Gestion RwLock async pour le trousseau de clés
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto       = true
+codegen-units = 1

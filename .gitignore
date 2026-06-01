@@ -1,0 +1,9 @@
+# Secrets — ne jamais committer
+config/agent_config.json
+data/session.json
+data/*.json
+
+# Binaires Rust
+/target/
+.cursor
+**/*.rs.bk
