@@ -19,6 +19,7 @@ name = "simulation_tests"
 path = "src/simulation_tests.rs"
 
 [dependencies]
+proxy_chiffreur = { path = "../proxy_chiffreur" }
 aes-gcm       = "0.10"
 x25519-dalek  = { version = "2", features = ["static_secrets"] }
 argon2        = "0.5"

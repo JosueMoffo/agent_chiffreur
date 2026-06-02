@@ -35,9 +35,13 @@ pub const CHEMIN_CONFIG: &str = "config/agent_config.json";
 /// Configuration complète de l'Agent Chiffreur.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Port du serveur HTTP (défaut: 5004).
+    /// Port du serveur HTTP central (défaut: 5004).
     #[serde(default = "default_port")]
     pub agent_port: u16,
+
+    /// Registre des proxies (`data/central_registry.json`).
+    #[serde(default = "default_chemin_registry")]
+    pub chemin_registry: String,
 
     /// Token d'authentification inter-agents.
     #[serde(default = "default_token")]
@@ -81,6 +85,7 @@ pub struct Config {
 
 // ── Valeurs par défaut ────────────────────────────────────────────────────────
 fn default_port()           -> u16    { 5004 }
+fn default_chemin_registry() -> String { "data/central_registry.json".to_string() }
 fn default_token()          -> String { "ENSPY-TOKEN-2026".to_string() }
 fn default_rotation_sec()   -> u64    { 300 }
 fn default_grace_sec()      -> u64    { 60 }
@@ -180,6 +185,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             agent_port: default_port(),
+            chemin_registry: default_chemin_registry(),
             agent_token: default_token(),
             intervalle_rotation_sec: default_rotation_sec(),
             old_key_grace_sec: default_grace_sec(),

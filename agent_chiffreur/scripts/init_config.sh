@@ -80,6 +80,7 @@ import json, sys
 config = {
     "_commentaire": "Configuration Agent Chiffreur ENSPY — SECURITY: fichier en mode 600",
     "agent_port": 5004,
+    "chemin_registry": "data/central_registry.json",
     "agent_token": "${AGENT_TOKEN}",
     "intervalle_rotation_sec": 300,
     "old_key_grace_sec": 60,
@@ -195,7 +196,7 @@ echo -e "  ${BOLD}  ./install.sh${RESET}"
 echo -e "  ou : ${BOLD}cargo build --release --bin agent_chiffreur && ./target/release/agent_chiffreur${RESET}"
 echo ""
 echo -e "  Enregistrer une VM :"
-echo -e "  ${BOLD}  curl -X POST http://localhost:5004/vm/session/register \\${RESET}"
+echo -e "  ${BOLD}  curl -X POST http://localhost:8400/vm/session/register \\${RESET}"
 echo -e "  ${BOLD}    -H 'X-Agent-Token: <token>' \\${RESET}"
 echo -e "  ${BOLD}    -d '{\"vm_id\":\"vm-001\",\"vm_pub_key_hex\":\"<64 hex>\",\"url_notification\":\"http://vm:9000/key-update\"}'${RESET}"
 echo ""

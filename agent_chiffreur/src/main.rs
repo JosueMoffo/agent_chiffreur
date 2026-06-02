@@ -21,15 +21,13 @@ async fn main() {
 
     let config = Config::charger(None);
     info!(
-        "[Config] port={} rotation={}s grace={}s agent_rotation='{}' session='{}'",
+        "[Config] port central={} decideur='{}' registry='{}'",
         config.agent_port,
-        config.intervalle_rotation_sec,
-        config.old_key_grace_sec,
         config.agent_rotation_autorise,
-        config.chemin_session,
+        config.chemin_registry,
     );
 
-    let (state, port) = preparer_agent(config, None, true, true).await;
+    let (state, port) = preparer_agent(config).await;
     let app = build_router(state);
 
     let addr = format!("0.0.0.0:{port}");

@@ -2,7 +2,7 @@
 
 ## Présentation
 
-L'**Agent Chiffreur** est la racine de confiance cryptographique du Système Multi-Agents (SMA) académique de l'ENSPY (École Nationale Supérieure Polytechnique de Yaoundé, Cameroun). Il fournit à l'ensemble des agents du SMA des services cryptographiques sécurisés via une API HTTP interne exposée sur le port **5004**.
+L'**Agent Chiffreur** est le processus **central** du SMA ENSPY (port **5004**) : registre des proxies VM, propagation de rotation, interface avec le **Décideur**. Le chiffrement opérationnel est délégué au crate sibling **`proxy_chiffreur/`** (port **8400**, une instance par VM). Voir [Guide_proxy.md](Guide_proxy.md).
 
 **Technologies utilisées :**
 - **Rust** (édition 2021) — sécurité mémoire et performance
@@ -15,41 +15,21 @@ L'**Agent Chiffreur** est la racine de confiance cryptographique du Système Mul
 
 ---
 
-## Architecture
+## Architecture (deux modules)
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Agent Chiffreur (port 5004)                  │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  Middleware X-Agent-Token (Tower)                           │   │
-│  │  ↓ (uniquement sur les routes POST)                        │   │
-│  ├────────────────────┬────────────────────────────────────────┤   │
-│  │   Routes POST      │   Routes GET (publiques)               │   │
-│  │  /encrypt          │   /health                              │   │
-│  │  /decrypt          │   /metrics                             │   │
-│  │  /credential/rotate│   /public-key                          │   │
-│  │  /ecdh/initiate    │                                        │   │
-│  │  /password/generate│                                        │   │
-│  └────────────────────┴────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌───────────────────┐   ┌───────────────────┐                     │
-│  │   CryptoMoteur    │   │  Config (depuis   │                     │
-│  │  AES-256-GCM      │   │  variables d'env) │                     │
-│  │  X25519 ECDH      │   └───────────────────┘                     │
-│  │  Argon2id         │                                              │
-│  └───────────────────┘                                              │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  Tâche dispatch XMPP (canaux Tokio mpsc)                    │   │
-│  │  → Tâche auditeur → Notificateur HTTP (reqwest)             │   │
-│  │  → Supervision entropie (périodique)                        │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-         │ notifications HTTP sortantes
-         ▼
-  Agent Auditeur (URL configurable via AGENT_AUDITEUR_URL)
+Décideur ──► agent_chiffreur :5004  (registry, /credential/rotate, /decideur/forward)
+                  ▲
+                  │ announce / vm sync
+proxy_chiffreur :8400  (encrypt, decrypt, /vm/session/register, /proxy/relay)
+                  ▲
+                  └── Application VM locale
 ```
+
+| Crate | Port | Rôle |
+|-------|------|------|
+| `agent_chiffreur/` | 5004 | Central — registre proxies, rotation globale, Décideur |
+| `../proxy_chiffreur/` | 8400 | Par VM — crypto locale, relais inter-VM |
 
 ---
 
@@ -65,7 +45,7 @@ L'**Agent Chiffreur** est la racine de confiance cryptographique du Système Mul
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `AGENT_PORT` | `5004` | Port HTTP |
+| `AGENT_PORT` | `5004` | Port HTTP agent central |
 | `AGENT_TOKEN` | `ENSPY-TOKEN-2026` | Token d'auth inter-agents |
 | `AGENT_AES_KEY_HEX` | *(éphémère)* | Clé AES-256 persistante (64 hex chars = 32 octets) |
 | `AGENT_SUPERVISION_SEC` | `10` | Intervalle supervision entropie (secondes) |

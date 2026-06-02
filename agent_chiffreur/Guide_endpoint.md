@@ -1,8 +1,8 @@
 # Guide des endpoints — Agent Chiffreur ENSPY
 
-Récapitulatif des fonctionnalités HTTP de l’agent (port **5004** par défaut) et exemples **curl** prêts à copier (sans variables shell).
+Récapitulatif HTTP — **agent central** port **5004**, **proxy VM** port **8400** (exemples curl ci-dessous ; crypto VM → proxy).
 
-**Base URL utilisée dans ce guide :** `http://localhost:5004`
+**Agent central :** `http://localhost:5004` — **Proxy VM :** `http://localhost:8400`
 
 **Token :** en-tête `X-Agent-Token` optionnel (toute valeur acceptée). Exemple ci-dessous : `ENSPY-TOKEN-2026` (valeur par défaut du code ; si vous utilisez `config/agent_config.json`, remplacez par la valeur du champ `agent_token`).
 
@@ -16,7 +16,7 @@ Récapitulatif des fonctionnalités HTTP de l’agent (port **5004** par défaut
 ./install.sh
 ```
 
-Initialise la configuration (`scripts/init_config.sh`), compile l’agent en release et démarre le serveur sur `http://localhost:5004` (ou le `agent_port` de `config/agent_config.json`).
+Initialise la configuration (`scripts/init_config.sh`), compile l’agent central et démarre sur `http://localhost:5004`. Sur chaque VM : `cd ../proxy_chiffreur && ./install.sh`.
 
 Options : `./install.sh --help`
 
@@ -29,7 +29,7 @@ Options : `./install.sh --help`
 Vérifie que l’agent est en ligne : uptime, version, nombre de VMs en session.
 
 ```bash
-curl -s http://localhost:5004/health
+curl -s http://localhost:8400/health
 ```
 
 ### GET `/metrics`
@@ -37,7 +37,7 @@ curl -s http://localhost:5004/health
 Métriques runtime : requêtes traitées, erreurs, mémoire, CPU, VMs en session.
 
 ```bash
-curl -s http://localhost:5004/metrics
+curl -s http://localhost:8400/metrics
 ```
 
 ### GET `/keystore/status`
@@ -45,7 +45,7 @@ curl -s http://localhost:5004/metrics
 Résumé du trousseau interne (legacy) et des sessions VM chargées depuis `data/session.json`.
 
 ```bash
-curl -s http://localhost:5004/keystore/status
+curl -s http://localhost:8400/keystore/status
 ```
 
 ### GET `/public-key`
@@ -53,7 +53,7 @@ curl -s http://localhost:5004/keystore/status
 Clé publique X25519 **statique** de l’agent (legacy). Pour les sessions VM, préférer `agent_ephemeral_public_key_hex` renvoyé par l’enregistrement ou la rotation.
 
 ```bash
-curl -s http://localhost:5004/public-key
+curl -s http://localhost:8400/public-key
 ```
 
 ---
@@ -67,7 +67,7 @@ Convention : `vm_id` entier **strictement supérieur à 100** (style Proxmox).
 Enregistre une VM : génère une paire X25519 **éphémère** côté agent, calcule le secret ECDH avec la clé publique VM, stocke `new_key` (AES-256) et `agent_public_key`.
 
 ```bash
-curl -s -X POST http://localhost:5004/vm/session/register \
+curl -s -X POST http://localhost:8400/vm/session/register \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -86,7 +86,7 @@ Réponse utile : `agent_ephemeral_public_key_hex`, `new_key_id`, `rotation_count
 Liste les sessions actives (aperçus de clés, pas les secrets complets).
 
 ```bash
-curl -s http://localhost:5004/vm/sessions \
+curl -s http://localhost:8400/vm/sessions \
   -H "X-Agent-Token: ENSPY-TOKEN-2026"
 ```
 
@@ -95,7 +95,7 @@ curl -s http://localhost:5004/vm/sessions \
 Supprime une session VM du fichier `session.json`.
 
 ```bash
-curl -s -X POST http://localhost:5004/vm/session/delete \
+curl -s -X POST http://localhost:8400/vm/session/delete \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{"vm_id": 101}'
@@ -106,7 +106,7 @@ curl -s -X POST http://localhost:5004/vm/session/delete \
 Purge les `old_key` dont le timer de grâce (`old_key_grace_sec`) est expiré.
 
 ```bash
-curl -s -X POST http://localhost:5004/vm/sessions/purge-expired \
+curl -s -X POST http://localhost:8400/vm/sessions/purge-expired \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{}'
@@ -123,7 +123,7 @@ Les messages sont chiffrés en **AES-256-GCM** (Base64 URL-safe sans padding pou
 Chiffre avec la **`new_key`** de la VM indiquée. La VM doit être enregistrée au préalable.
 
 ```bash
-curl -s -X POST http://localhost:5004/encrypt \
+curl -s -X POST http://localhost:8400/encrypt \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -141,7 +141,7 @@ Déchiffre avec `new_key` ; en cas d’échec GCM, tente **`old_key`** si encore
 Remplacez `CIPHERTEXT`, `IV` et `AUTH_TAG` par les valeurs renvoyées par `/encrypt` :
 
 ```bash
-curl -s -X POST http://localhost:5004/decrypt \
+curl -s -X POST http://localhost:8400/decrypt \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -184,7 +184,7 @@ Exemple de corps envoyé à la VM (notification) : `agent_ephemeral_public_key_h
 Échange ECDH générique : nouvelle paire éphémère agent à chaque appel, secret partagé avec la clé publique du pair.
 
 ```bash
-curl -s -X POST http://localhost:5004/ecdh/initiate \
+curl -s -X POST http://localhost:8400/ecdh/initiate \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -200,7 +200,7 @@ Réponse : `agent_ephemeral_public_key_hex`, `shared_secret_hex`.
 Évalue la force d’un secret (barème ENSPY /100 : longueur, diversité, entropie).
 
 ```bash
-curl -s -X POST http://localhost:5004/secret/strength \
+curl -s -X POST http://localhost:8400/secret/strength \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{"secret": "Tr0ub4dor&3_ENSPY!2026#"}'
@@ -211,7 +211,7 @@ curl -s -X POST http://localhost:5004/secret/strength \
 Génère un mot de passe fort selon les options.
 
 ```bash
-curl -s -X POST http://localhost:5004/password/generate \
+curl -s -X POST http://localhost:8400/password/generate \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -232,10 +232,10 @@ Enchaînement minimal pour valider le flux VM de bout en bout :
 
 ```bash
 # 1. Santé
-curl -s http://localhost:5004/health
+curl -s http://localhost:8400/health
 
 # 2. Enregistrer la VM 101
-curl -s -X POST http://localhost:5004/vm/session/register \
+curl -s -X POST http://localhost:8400/vm/session/register \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -244,13 +244,13 @@ curl -s -X POST http://localhost:5004/vm/session/register \
   }'
 
 # 3. Chiffrer
-curl -s -X POST http://localhost:5004/encrypt \
+curl -s -X POST http://localhost:8400/encrypt \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{"vm_id": 101, "plaintext": "Test bout en bout"}'
 
 # 4. Coller ciphertext / iv / auth_tag dans la commande decrypt suivante
-curl -s -X POST http://localhost:5004/decrypt \
+curl -s -X POST http://localhost:8400/decrypt \
   -H "Content-Type: application/json" \
   -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{
@@ -267,7 +267,7 @@ curl -s -X POST http://localhost:5004/credential/rotate \
   -d '{}'
 
 # 6. Lister les sessions
-curl -s http://localhost:5004/vm/sessions \
+curl -s http://localhost:8400/vm/sessions \
   -H "X-Agent-Token: ENSPY-TOKEN-2026"
 ```
 
@@ -320,5 +320,9 @@ Pour exécuter tous les scénarios HTTP automatisés (serveur local dédié, hor
 ```
 
 Équivalent manuel : `cargo build --release --bin simulation_tests && ./target/release/simulation_tests`
+
+## 10. Proxy VM (trafic inter-VM)
+
+Chaque VM exécute **`proxy_chiffreur`** (port **8400**). Crypto (`/encrypt`, `/vm/session/register`, …) : base `http://localhost:8400`. Rotation globale : `POST http://localhost:5004/credential/rotate`. Voir [Guide_proxy.md](Guide_proxy.md).
 
 Voir aussi : [Guide_des_secrets.md](Guide_des_secrets.md), [README.md](README.md).
