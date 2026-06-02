@@ -1,0 +1,14 @@
+{
+  "_commentaire": "Configuration proxy VM — une copie par machine (ex. proxy_config.101.json)",
+  "local_vm_id": 101,
+  "listen_port": 8400,
+  "agent_central_url": "http://127.0.0.1:5004",
+  "agent_token": "REMPLACER_PAR_LE_MEME_TOKEN_QUE_L_AGENT_CENTRAL",
+  "chemin_session": "data/session.json",
+  "chemin_cle_privee": "data/proxy_vm_secret.json",
+  "local_deliver_url": "http://127.0.0.1:8080/deliver",
+  "old_key_grace_sec": 60,
+  "peers": {
+    "102": "http://127.0.0.1:8400"
+  }
+}

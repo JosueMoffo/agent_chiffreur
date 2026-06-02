@@ -2,6 +2,7 @@
   "_commentaire": "Fichier de configuration Agent Chiffreur ENSPY — NE PAS COMMITTER agent_config.json",
   "_instructions": "Copier vers agent_config.json et exécuter bash scripts/init_config.sh",
   "agent_port": 5004,
+  "chemin_registry": "data/central_registry.json",
   "agent_token": "REMPLACER_PAR_TOKEN_ALEATOIRE_64_HEX",
   "intervalle_rotation_sec": 300,
   "old_key_grace_sec": 60,

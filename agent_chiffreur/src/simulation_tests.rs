@@ -27,8 +27,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm::aead::OsRng;
-use agent_chiffreur::app::{build_router, preparer_agent};
+use agent_chiffreur::app::{build_router as build_router_central, preparer_agent};
 use agent_chiffreur::config::Config;
+use proxy_chiffreur::app::{build_router as build_router_proxy, preparer_proxy};
+use proxy_chiffreur::config::ProxyConfig;
 use agent_chiffreur::sessions_vm::GestionnaireSessionsVm;
 use agent_chiffreur::sim_export::{
     apercu_hex, chiffrer_dechiffrer_avec_cle_vm, exporter_sim_blobs, JournalSimulation,
@@ -306,7 +308,8 @@ async fn main() {
     let token = meta["agent_token_test"]
         .as_str()
         .unwrap_or("ENSPY-TOKEN-2026");
-    let port = meta["port_simulation"].as_u64().unwrap_or(15004) as u16;
+    let port_central = meta["port_agent_central"].as_u64().unwrap_or(15004) as u16;
+    let port_proxy = meta["port_proxy_simulation"].as_u64().unwrap_or(18400) as u16;
     let grace = meta["old_key_grace_sec_test"].as_u64().unwrap_or(3);
     let chemin_session = meta["chemin_session_test"]
         .as_str()
@@ -328,42 +331,89 @@ async fn main() {
     )
     .expect("init sim_session.json");
 
-    let mut config = Config::default();
-    config.agent_port = port;
-    config.agent_token = token.to_string();
-    config.old_key_grace_sec = grace;
-    config.agent_rotation_autorise = agent_ok.to_string();
-    config.chemin_session = chemin_session.to_string();
-    config.intervalle_supervision_sec = 3600;
-    config.intervalle_rotation_sec = 3600;
+    let mut config_central = Config::default();
+    config_central.agent_port = port_central;
+    config_central.agent_token = token.to_string();
+    config_central.agent_rotation_autorise = agent_ok.to_string();
+    config_central.chemin_registry = "data/sim_central_registry.json".to_string();
+
+    let mut proxy_cfg = ProxyConfig {
+        local_vm_id: 101,
+        listen_port: port_proxy,
+        agent_central_url: format!("http://127.0.0.1:{port_central}"),
+        agent_token: token.to_string(),
+        chemin_session: chemin_session.to_string(),
+        chemin_cle_privee: "data/sim_proxy_secret.json".to_string(),
+        local_deliver_url: "http://127.0.0.1:19999/deliver".to_string(),
+        old_key_grace_sec: grace,
+        peers: std::collections::HashMap::from([
+            ("102".to_string(), format!("http://127.0.0.1:{}", port_proxy + 1)),
+            ("103".to_string(), format!("http://127.0.0.1:{}", port_proxy + 2)),
+        ]),
+    };
 
     let mut journal = JournalSimulation::default();
 
-    let (state, _) = preparer_agent(config, Some(chemin_blobs_agent), false, false).await;
-    let app = build_router(Arc::clone(&state));
-    let addr = format!("0.0.0.0:{port}");
-
-    let listener = tokio::net::TcpListener::bind(&addr)
+    let (state_central, _) = preparer_agent(config_central).await;
+    let app_central = build_router_central(Arc::clone(&state_central));
+    let addr_central = format!("0.0.0.0:{port_central}");
+    let listener_c = tokio::net::TcpListener::bind(&addr_central)
         .await
-        .expect("bind port simulation");
-    let serve = axum::serve(listener, app);
-    let handle_serveur = tokio::spawn(async move {
-        serve.await.expect("serveur simulation");
+        .expect("bind agent central");
+    let handle_central = tokio::spawn(async move {
+        axum::serve(listener_c, app_central)
+            .await
+            .expect("serveur central");
     });
 
-    let base = format!("http://127.0.0.1:{port}");
-    let client = ClientHttp::new(&base, token);
+    let (state_proxy, _) = preparer_proxy(proxy_cfg.clone(), true).await;
+    let app_proxy = build_router_proxy(Arc::clone(&state_proxy));
+    let addr_proxy = format!("0.0.0.0:{}", proxy_cfg.listen_port);
+    let listener_p = tokio::net::TcpListener::bind(&addr_proxy)
+        .await
+        .expect("bind proxy");
+    let handle_proxy = tokio::spawn(async move {
+        axum::serve(listener_p, app_proxy)
+            .await
+            .expect("serveur proxy");
+    });
 
-    etape("URL agent", &base);
+    let base_central = format!("http://127.0.0.1:{port_central}");
+    let base_proxy = format!("http://127.0.0.1:{port_proxy}");
+    let client = ClientHttp::new(&base_proxy, token);
+    let client_central = ClientHttp::new(&base_central, token);
+
+    etape("URL agent central", &base_central);
+    etape("URL proxy VM", &base_proxy);
     etape("sessions VM", chemin_session);
     etape("export final", chemin_sim_blobs);
-    etape("blobs agent", chemin_blobs_agent);
 
-    if !client.attendre_health(5).await {
-        handle_serveur.abort();
-        panic!("L'agent n'a pas répondu sur /health dans les 5 secondes.");
+    if !client_central.attendre_health(5).await {
+        handle_central.abort();
+        handle_proxy.abort();
+        panic!("Agent central /health timeout.");
     }
-    ok("Serveur HTTP prêt — intégration réelle");
+    if !client.attendre_health(5).await {
+        handle_central.abort();
+        handle_proxy.abort();
+        panic!("Proxy /health timeout.");
+    }
+    ok("Agent central + proxy prêts");
+
+    if let Err(e) = state_proxy
+        .central
+        .annoncer_proxy(
+            proxy_cfg.local_vm_id,
+            &base_proxy,
+            &state_proxy.secret.public_key_hex,
+        )
+        .await
+    {
+        handle_central.abort();
+        handle_proxy.abort();
+        panic!("Annonce proxy au central : {e}");
+    }
+    ok("Proxy annoncé dans le registre central");
 
     let mut nb_ok = 0u32;
     let mut nb_ko = 0u32;
@@ -539,7 +589,7 @@ async fn main() {
 
     let res_list = client
         .http
-        .get(format!("{base}/vm/sessions"))
+        .get(format!("{base_proxy}/vm/sessions"))
         .header("X-Agent-Token", token)
         .send()
         .await
@@ -669,14 +719,14 @@ async fn main() {
         let id = sc["id"].as_str().unwrap_or("?");
         let name = sc["agent_name"].as_str().unwrap_or("");
         workflow_step(1, &format!("{id} : X-Agent-Name = '{name}' → HTTP {attendu}"));
-        let (st_i, rep_i) = client.post_rotate(name, json!({})).await;
+        let (st_i, rep_i) = client_central.post_rotate(name, json!({})).await;
         assert_ok!(
             st_i.as_u16() == attendu as u16 && rep_i["error"] == sc["error_code"],
             &format!("I/{id} — accès refusé ({})", sc["error_code"])
         );
     }
     workflow_step(3, "I-ok : agent autorisé → HTTP 200");
-    let (st_i_ok, _) = client.post_rotate(agent_ok, json!({})).await;
+    let (st_i_ok, _) = client_central.post_rotate(agent_ok, json!({})).await;
     assert_ok!(st_i_ok == StatusCode::OK, "I/I-ok — rotation autorisée");
 
     // ═══ J — Rotation ECDH ════════════════════════════════════════════════════
@@ -705,13 +755,13 @@ async fn main() {
         "J — chiffrement référence avant rotation"
     );
 
-    workflow_step(1, "POST /credential/rotate (vérif. cycle old/new)");
-    let (st_j, rep_j) = client.post_rotate(agent_ok, json!({})).await;
-    etape("vms_reussies", &rep_j["vms_reussies"].to_string());
+    workflow_step(1, "POST /credential/rotate central → proxy (cycle old/new)");
+    let (st_j, rep_j) = client_central.post_rotate(agent_ok, json!({})).await;
+    etape("proxies_reussis", &rep_j["proxies_reussis"].to_string());
 
     assert_ok!(
-        st_j == StatusCode::OK && rep_j["vms_reussies"].as_u64() == Some(vms_def.len() as u64),
-        "J — toutes les VMs rotatées via HTTP"
+        st_j == StatusCode::OK && rep_j["proxies_reussis"].as_u64().unwrap_or(0) >= 1,
+        "J — rotation propagée au proxy via agent central"
     );
 
     for vm_def in &vms_def {
@@ -740,17 +790,6 @@ async fn main() {
                 "new_key_apercu": apercu_hex(apres["new_key"].as_str().unwrap_or(""), 16),
                 "old_key_apercu": apres["old_key"].as_str().map(|k| apercu_hex(k, 16)),
             }),
-        );
-    }
-
-    let res_103 = rep_j["resultats"]
-        .as_array()
-        .and_then(|a| a.iter().find(|r| r["vm_id"] == 103))
-        .cloned();
-    if let Some(r) = res_103 {
-        assert_ok!(
-            r["succes"] == true && r["notifiee"] == false,
-            "J/103 — rotation OK, notifiee=false (pas d'URL)"
         );
     }
 
@@ -819,11 +858,11 @@ async fn main() {
             .await;
     }
 
-    workflow_step(1, "Première POST /credential/rotate");
-    client.post_rotate(agent_ok, json!({})).await;
+    workflow_step(1, "Première POST /credential/rotate (central)");
+    client_central.post_rotate(agent_ok, json!({})).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    workflow_step(2, "Deuxième POST /credential/rotate");
-    client.post_rotate(agent_ok, json!({})).await;
+    workflow_step(2, "Deuxième POST /credential/rotate (central)");
+    client_central.post_rotate(agent_ok, json!({})).await;
 
     for vm_id in [201u32, 202] {
         let s = session_vm(chemin_session, vm_id).unwrap();
@@ -832,7 +871,8 @@ async fn main() {
     }
 
     // ═══ Export persistant ════════════════════════════════════════════════════
-    handle_serveur.abort();
+    handle_central.abort();
+    handle_proxy.abort();
 
     sep("EXPORT — Persistance data/sim_blobs.json");
     workflow_step(1, "Fusion sim_session.json + sim_agent_blobs.json + journal");
