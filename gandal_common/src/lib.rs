@@ -15,4 +15,5 @@ pub use proto::{
     proxy_chiffreur_service_server::{ProxyChiffreurService, ProxyChiffreurServiceServer},
     AuditeurEvent, Empty, EventAck, HealthResponse, ProxyAnnounceRequest, ProxyAnnounceResponse,
     RegistryStatusResponse, RotateRequest, RotateResponse, VmSyncRequest, VmSyncResponse,
+    RotateProxyResult,
 };

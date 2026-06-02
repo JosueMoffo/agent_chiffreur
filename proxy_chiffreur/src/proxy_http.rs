@@ -129,7 +129,7 @@ pub async fn handle_health(State(st): State<SharedProxyState>) -> impl IntoRespo
         "status": "ok",
         "message_type": "health_response",
         "local_vm_id": st.config.local_vm_id,
-        "agent_central_url": st.config.agent_central_url,
+        "agent_central_url": st.config.agent_central_grpc,
         "peers_count": peers.len(),
         "vms_en_session": nb_vms,
         "uptime_sec": st.start_time.elapsed().as_secs(),

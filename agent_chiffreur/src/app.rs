@@ -26,7 +26,7 @@ pub async fn preparer_agent(config: Config) -> Arc<CentralState> {
         let st_auto = Arc::clone(&state);
         let intervalle = config.intervalle_rotation_sec;
         tokio::spawn(async move {
-            tache_rotation_automatique_central(st_auto, intervalle).await;
+            tache_rotation_automatique_central(st_auto.into(), intervalle).await;
         });
         info!(
             "[Agent central] rotation automatique toutes les {}s",

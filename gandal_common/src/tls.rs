@@ -64,10 +64,9 @@ pub fn server_tls_config(pki: &GandalPkiPaths) -> Result<ServerTlsConfig, TlsErr
     let key_pem = lire_fichier(&pki.key)?;
     let identity = Identity::from_pem(cert_pem, key_pem);
 
-    ServerTlsConfig::new()
-        .identity(identity)
-        .client_ca_root(ca)
-        .map_err(|e| TlsError::Config(e.to_string()))
+    Ok(ServerTlsConfig::new()
+            .identity(identity)
+            .client_ca_root(ca))
 }
 
 /// Configuration client gRPC vers un pair (vérifie la CA, présente notre identité).
@@ -77,11 +76,10 @@ pub fn client_tls_config(pki: &GandalPkiPaths, domain: &str) -> Result<ClientTls
     let key_pem = lire_fichier(&pki.key)?;
     let identity = Identity::from_pem(cert_pem, key_pem);
 
-    ClientTlsConfig::new()
-        .domain_name(domain)
-        .ca_certificate(ca)
-        .identity(identity)
-        .map_err(|e| TlsError::Config(e.to_string()))
+    Ok(ClientTlsConfig::new()
+            .domain_name(domain)
+            .ca_certificate(ca)
+            .identity(identity))
 }
 
 /// Construit une URI tonic `https://host:port` pour un agent SMA.

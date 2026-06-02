@@ -80,8 +80,8 @@ pub async fn handle_health(State(st): State<SharedCentralState>) -> impl IntoRes
         "proxies_enregistres": reg.proxies.len(),
         "vms_registrees": reg.vms.len(),
         "agent_port_officiel": 5004,
-        "decideur_url": st.config.url_decideur(),
-        "auditeur_url": st.config.url_auditeur(),
+        "decideur_url": st.config.adresse_grpc_decideur(),
+        "auditeur_url": st.config.adresse_grpc_auditeur(),
         "decideur_autorise": st.config.agent_rotation_autorise,
         "rotation_auto_sec": st.config.intervalle_rotation_sec,
         "communication_sma": ["Decideur:5003", "Auditeur:5005"],
@@ -256,7 +256,7 @@ pub async fn handle_rotate(
             "proxies_total": rapport.proxies_total,
             "proxies_reussis": rapport.proxies_reussis,
             "resultats": rapport.resultats,
-            "auditeur_notifie": st.config.url_auditeur().is_some(),
+            "auditeur_notifie": st.config.adresse_grpc_auditeur().is_some(),
             "timestamp": chrono::Utc::now().to_rfc3339()
         })),
     )

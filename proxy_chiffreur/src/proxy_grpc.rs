@@ -1,6 +1,7 @@
 //! Serveur gRPC GANDAL du proxy (mTLS) — agent central uniquement.
 
 use std::sync::Arc;
+use gandal_common::tls::CN_PROXY;
 
 use gandal_common::tls::{exiger_cn_client, CN_CHIFFREUR};
 use gandal_common::{
@@ -55,7 +56,7 @@ impl ProxyChiffreurService for ProxyGrpc {
             status: "success".into(),
             type_rotation: "propagation".into(),
             proxies_total: rapport.vms_total as u32,
-            proxies_reussis: rapport.vms_reussies,
+            proxies_reussis: rapport.vms_reussies as u32,
             resultats: rapport
                 .resultats
                 .iter()
