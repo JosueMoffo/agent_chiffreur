@@ -19,7 +19,9 @@ name = "simulation_tests"
 path = "src/simulation_tests.rs"
 
 [dependencies]
+gandal_common = { path = "../gandal_common" }
 proxy_chiffreur = { path = "../proxy_chiffreur" }
+tonic = { version = "0.12", features = ["tls", "transport"] }
 aes-gcm       = "0.10"
 x25519-dalek  = { version = "2", features = ["static_secrets"] }
 argon2        = "0.5"
@@ -51,3 +53,21 @@ dotenvy       = "0.15"
 opt-level = 3
 lto       = true
 codegen-units = 1
+
+# Paquet .deb autonome (binaire statiquement lié aux deps Rust — pas de toolchain sur la cible)
+# Construction : cargo deb --release  (nécessite cargo-deb sur la machine de build)
+[package.metadata.deb]
+name = "agent-chiffreur"
+maintainer = "ENSPY SMA 2025-2026 <sma@enspy.local>"
+copyright = "2026 ENSPY SMA"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+recommends = "systemd"
+maintainer-scripts = "debian"
+assets = [
+    ["target/release/agent_chiffreur", "usr/bin/agent_chiffreur", "755"],
+    ["config/agent_config.example.json", "usr/share/agent-chiffreur/agent_config.example.json", "644"],
+    ["debian/agent_chiffreur.service", "lib/systemd/system/agent_chiffreur.service", "644"],
+    ["debian/agent-chiffreur.default", "etc/default/agent-chiffreur", "644"],
+]

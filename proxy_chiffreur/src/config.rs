@@ -1,6 +1,7 @@
-//! Configuration du proxy chiffreur (une instance par VM, port 8400).
+//! Configuration du proxy chiffreur (HTTP 8400 apps + gRPC mTLS agent).
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -11,14 +12,19 @@ pub const CHEMIN_CONFIG_PROXY_DEFAUT: &str = "config/proxy_config.json";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     pub local_vm_id: u32,
+    /// Port HTTP (applications VM, relais inter-proxy).
     #[serde(default = "default_listen_port")]
     pub listen_port: u16,
-    /// URL de l'agent chiffreur central (port 5004).
-    #[serde(default = "default_agent_central_url", alias = "agent_url")]
-    pub agent_central_url: String,
+    /// Adresse gRPC de l'agent central (`host:port`, port 5004).
+    #[serde(default = "default_agent_central_grpc", alias = "agent_central_url", alias = "agent_url")]
+    pub agent_central_grpc: String,
+    /// Port gRPC mTLS (agent central ↔ ce proxy).
+    #[serde(default = "default_grpc_port")]
+    pub grpc_port: u16,
+    #[serde(default = "default_grpc_host")]
+    pub grpc_listen_host: String,
     #[serde(default)]
     pub agent_token: String,
-    /// Clés AES / ECDH des VMs (pairs) — ancienne logique agent, locale au proxy.
     #[serde(default = "default_chemin_session")]
     pub chemin_session: String,
     #[serde(default = "default_grace_sec")]
@@ -27,7 +33,7 @@ pub struct ProxyConfig {
     pub chemin_cle_privee: String,
     #[serde(default = "default_deliver_url")]
     pub local_deliver_url: String,
-    /// VMID distant → URL de base du proxy pair (ex. `http://10.0.0.102:8400`)
+    /// VMID distant → URL HTTP du proxy pair (relais inter-VM).
     #[serde(default)]
     pub peers: HashMap<String, String>,
 }
@@ -35,8 +41,14 @@ pub struct ProxyConfig {
 fn default_listen_port() -> u16 {
     8400
 }
-fn default_agent_central_url() -> String {
-    "http://127.0.0.1:5004".to_string()
+fn default_grpc_port() -> u16 {
+    18400
+}
+fn default_grpc_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_agent_central_grpc() -> String {
+    "127.0.0.1:5004".to_string()
 }
 fn default_grace_sec() -> u64 {
     60
@@ -64,7 +76,9 @@ impl ProxyConfig {
             Self {
                 local_vm_id: 101,
                 listen_port: default_listen_port(),
-                agent_central_url: default_agent_central_url(),
+                agent_central_grpc: default_agent_central_grpc(),
+                grpc_port: default_grpc_port(),
+                grpc_listen_host: default_grpc_host(),
                 agent_token: "ENSPY-TOKEN-2026".to_string(),
                 chemin_session: default_chemin_session(),
                 old_key_grace_sec: default_grace_sec(),
@@ -73,6 +87,16 @@ impl ProxyConfig {
                 peers: HashMap::new(),
             }
         }
+    }
+
+    pub fn grpc_socket_addr(&self) -> SocketAddr {
+        format!("{}:{}", self.grpc_listen_host, self.grpc_port)
+            .parse()
+            .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], self.grpc_port)))
+    }
+
+    pub fn grpc_advertise_addr(&self) -> String {
+        format!("127.0.0.1:{}", self.grpc_port)
     }
 
     pub fn url_proxy_peer(&self, dest_vm_id: u32) -> Option<String> {

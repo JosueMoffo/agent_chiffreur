@@ -4,18 +4,20 @@ Le dépôt est scindé en deux crates au même niveau :
 
 | Composant | Dossier | Port | Rôle |
 |-----------|---------|------|------|
-| **Agent central** | `agent_chiffreur/` | **5004** | Registre des proxies, rotation globale, interface Décideur |
-| **Proxy VM** | `proxy_chiffreur/` | **8400** | Chiffrement/déchiffrement local, sessions VM, relais inter-VM |
+| **Agent central** | `agent_chiffreur/` | **5004** (gRPC mTLS) | SMA : Décideur + Auditeur ; registre proxies |
+| **Proxy VM** | `proxy_chiffreur/` | **8400** HTTP + **18400** gRPC | Crypto VM, relais inter-proxy **HTTP** |
 
 ## Architecture
 
 ```
-Décideur ──► Agent central :5004
-                ▲ announce / sync
-Proxy VM :8400 ─┘  crypto local, relay JSON inchangé
-    ▲
-    └── Application VM
+Décideur :5003 ──gRPC mTLS RotateCredentials──► Agent central :5004
+Agent central ──gRPC mTLS PublishEvent──► Auditeur :5005
+                ▲ gRPC AnnounceProxy / SyncVm (CN=proxy)
+Proxy :18400 gRPC ─┘
+Proxy :8400 HTTP  ──► relais inter-proxy + applications VM
 ```
+
+Le proxy n’appelle pas le Décideur ni l’Auditeur : seul l’agent central est sur le bus SMA.
 
 ## Démarrage
 
@@ -32,7 +34,7 @@ PROXY_CONFIG=config/proxy_config.101.json ./install.sh
 
 | Fichier | Description |
 |---------|-------------|
-| `config/proxy_config.json` | `local_vm_id`, port 8400, `agent_central_url`, table `peers` |
+| `config/proxy_config.json` | `local_vm_id`, `listen_port` 8400, `grpc_port` 18400, `agent_central_grpc`, table `peers` (HTTP) |
 | `data/session.json` | Clés AES des VMs enregistrées sur ce proxy |
 | `data/proxy_session.json` | Sessions pair à pair (handshake inter-proxy) |
 | `data/proxy_vm_secret.json` | Clé X25519 locale du proxy |
@@ -63,4 +65,4 @@ Le proxy chiffre le champ `request` pour le transport, le proxy cible déchiffre
 
 ## Rotation
 
-Seul le **Décideur** (via l’agent central) déclenche `POST /credential/rotate` sur le port **5004**. L’agent propage la rotation à chaque proxy enregistré.
+Seul le **Décideur** déclenche `POST /credential/rotate` sur le port **5004** avec **`X-Agent-Token`**. L’agent propage la rotation à chaque proxy (également protégé par token), puis journalise sur l’auditeur (`POST /events`).

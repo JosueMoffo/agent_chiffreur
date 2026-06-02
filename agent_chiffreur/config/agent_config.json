@@ -1,6 +1,7 @@
 {
   "_commentaire": "Configuration Agent Chiffreur ENSPY \u2014 SECURITY: fichier en mode 600",
-  "agent_port": 5002,
+  "agent_port": 5004,
+  "grpc_listen_host": "0.0.0.0",
   "chemin_registry": "data/central_registry.json",
   "agent_token": "d8d137d13f5f5b3fdeafd9b389ae241b9a61a5362a753c162047bd5772f6dd7c",
   "intervalle_rotation_sec": 300,
@@ -11,7 +12,7 @@
   "chemin_session": "data/session.json",
   "agent_auditeur_url": null,
   "agents_connus": {
-    "Decideur": "http://localhost:5003",
-    "auditeur": "http://localhost:8500"
+    "Decideur": "127.0.0.1:5003",
+    "auditeur": "127.0.0.1:5005"
   }
 }

@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package gandal.v1;
+
+// ── Messages communs ───────────────────────────────────────────────────────────
+
+message Empty {}
+
+message HealthResponse {
+  string status = 1;
+  string role = 2;
+  uint64 uptime_sec = 3;
+  string version = 4;
+}
+
+message RotateRequest {
+  string request_id = 1;
+  string initiateur = 2;
+}
+
+message RotateProxyResult {
+  uint32 proxy_vm_id = 1;
+  bool succes = 2;
+  string detail = 3;
+}
+
+message RotateResponse {
+  string request_id = 1;
+  string status = 2;
+  string type_rotation = 3;
+  uint32 proxies_total = 4;
+  uint32 proxies_reussis = 5;
+  repeated RotateProxyResult resultats = 6;
+}
+
+message ProxyAnnounceRequest {
+  uint32 vm_id = 1;
+  string proxy_http_url = 2;
+  string proxy_grpc_addr = 3;
+  string public_key_hex = 4;
+}
+
+message ProxyAnnounceResponse {
+  string request_id = 1;
+  string status = 2;
+  uint32 vm_id = 3;
+}
+
+message VmSyncRequest {
+  uint32 vm_id = 1;
+  string public_key_hex = 2;
+  uint32 heberge_par_proxy_vm_id = 3;
+}
+
+message VmSyncResponse {
+  string status = 1;
+  uint32 vm_id = 2;
+}
+
+message RegistryStatusResponse {
+  string status = 1;
+  uint32 proxies_count = 2;
+  uint32 vms_count = 3;
+}
+
+message AuditeurEvent {
+  string request_id = 1;
+  string source_agent = 2;
+  string event_type = 3;
+  string timestamp = 4;
+  string payload_json = 5;
+}
+
+message EventAck {
+  string status = 1;
+}
+
+// ── Agent chiffreur central (port gRPC 5004, CN=chiffreur) ─────────────────────
+
+service ChiffreurService {
+  rpc Health(Empty) returns (HealthResponse);
+  rpc RotateCredentials(RotateRequest) returns (RotateResponse);
+  rpc AnnounceProxy(ProxyAnnounceRequest) returns (ProxyAnnounceResponse);
+  rpc SyncVm(VmSyncRequest) returns (VmSyncResponse);
+  rpc RegistryStatus(Empty) returns (RegistryStatusResponse);
+}
+
+// ── Proxy VM (gRPC dédié ; HTTP reste pour relais inter-proxy) ─────────────────
+
+service ProxyChiffreurService {
+  rpc Health(Empty) returns (HealthResponse);
+  rpc RotateCredentials(RotateRequest) returns (RotateResponse);
+}
+
+// ── Auditeur (port gRPC 5005, CN=auditeur) — client depuis le chiffreur ───────
+
+service AuditeurService {
+  rpc PublishEvent(AuditeurEvent) returns (EventAck);
+}

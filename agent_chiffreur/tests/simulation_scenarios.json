@@ -1,5 +1,5 @@
 {
-  "_commentaire": "Métadonnées des scénarios — pas de clés statiques ; les clés sont générées à l'exécution",
+  "_commentaire": "Métadonnées des scénarios — rotation central via gRPC mTLS (CN decideur)",
   "agent_token_test": "ENSPY-TOKEN-2026",
   "agent_rotation_autorise": "Decideur",
   "port_agent_central": 15004,
@@ -28,20 +28,18 @@
   "scenarios_acces_rotation": [
     {
       "id": "I-ok",
-      "agent_name": "Decideur",
-      "attendu_http": 200
+      "cert_role": "decideur",
+      "attendu_ok": true
     },
     {
       "id": "I-intrus",
-      "agent_name": "intrus",
-      "attendu_http": 403,
-      "error_code": "FORBIDDEN"
+      "cert_role": "proxy",
+      "attendu_ok": false
     },
     {
-      "id": "I-vide",
-      "agent_name": "",
-      "attendu_http": 403,
-      "error_code": "FORBIDDEN"
+      "id": "I-chiffreur",
+      "cert_role": "chiffreur",
+      "attendu_ok": false
     }
   ]
 }

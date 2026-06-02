@@ -10,9 +10,10 @@
   "intervalle_supervision_sec": 10,
   "seuil_entropie": 256,
   "chemin_session": "data/session.json",
-  "agent_auditeur_url": null,
+  "agent_auditeur_url": "127.0.0.1:5005",
+  "grpc_listen_host": "0.0.0.0",
   "agents_connus": {
-    "Decideur": "http://localhost:5003",
-    "auditeur": "http://localhost:8500"
+    "Decideur": "127.0.0.1:5003",
+    "auditeur": "127.0.0.1:5005"
   }
 }

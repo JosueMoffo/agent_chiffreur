@@ -227,3 +227,24 @@ pub struct AlerteEntropieData {
     pub threshold: u32,
     pub action: &'static str,
 }
+
+/// Événement de rotation envoyé à l'auditeur (`POST /events`, port 5005).
+#[derive(Debug, Serialize)]
+pub struct EvenementRotationAuditeur {
+    pub request_id: String,
+    pub source_agent: &'static str,
+    pub event_type: &'static str,
+    pub timestamp: DateTime<Utc>,
+    pub data: EvenementRotationAuditeurData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EvenementRotationAuditeurData {
+    /// `automatique` ou `ordonnee` (ordonnée par le Décideur).
+    pub type_rotation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ordonne_par: Option<String>,
+    pub proxies_total: usize,
+    pub proxies_reussis: u32,
+    pub proxies_echecs: usize,
+}

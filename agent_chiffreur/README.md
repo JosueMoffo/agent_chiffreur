@@ -18,7 +18,8 @@ L'**Agent Chiffreur** est le processus **central** du SMA ENSPY (port **5004**) 
 ## Architecture (deux modules)
 
 ```
-Décideur ──► agent_chiffreur :5004  (registry, /credential/rotate, /decideur/forward)
+Décideur :5003 ──► agent_chiffreur :5004  (/credential/rotate)
+agent_chiffreur ──► Auditeur :5005  (POST /events — rotations)
                   ▲
                   │ announce / vm sync
 proxy_chiffreur :8400  (encrypt, decrypt, /vm/session/register, /proxy/relay)
@@ -67,7 +68,7 @@ cargo build --release
 
 # Avec clé AES persistante et agent auditeur configuré
 AGENT_AES_KEY_HEX="a1b2c3...64chars..." \
-AGENT_AUDITEUR_URL="http://localhost:8500/alert" \
+AGENT_AUDITEUR_URL="http://localhost:5005/events" \
 ./target/release/agent_chiffreur
 
 # Simulation intégration HTTP (scénarios 0–L, endpoints réels, port 15004)
@@ -90,7 +91,7 @@ AGENT_AUDITEUR_URL="http://localhost:8500/alert" \
 | `POST` | `/vm/session/delete` | ✅ Token | Supprimer session VM |
 | `GET` | `/vm/sessions` | ✅ Token | Lister sessions actives |
 | `POST` | `/vm/sessions/purge-expired` | ✅ Token | Purger les old_key expirées |
-| `POST` | `/credential/rotate` | `X-Agent-Name` | Rotation ECDH toutes VMs |
+| `POST` | `/credential/rotate` | `X-Agent-Token` | Rotation (Décideur) → propagation proxies |
 | `GET` | `/public-key` | ❌ Public | Clé publique X25519 |
 | `GET` | `/health` | ❌ Public | Statut + uptime |
 | `GET` | `/metrics` | ❌ Public | Métriques runtime |

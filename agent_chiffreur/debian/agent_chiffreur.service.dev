@@ -1,0 +1,16 @@
+[Unit]
+Description=Agent Chiffreur SMA ENSPY (développement — répertoire source)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+EnvironmentFile=-@WORKDIR@/debian/agent-chiffreur.default
+Environment=AGENT_CONFIG=@WORKDIR@/config/agent_config.json
+ExecStart=@BINARY@
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

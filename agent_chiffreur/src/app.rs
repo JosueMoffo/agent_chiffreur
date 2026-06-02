@@ -1,58 +1,56 @@
-//! Démarrage de l'agent chiffreur **central** (port 5004).
+//! Démarrage de l'agent chiffreur **central** (gRPC mTLS port 5004).
 
 use std::sync::Arc;
 
-use axum::{
-    middleware,
-    routing::{get, post},
-    Router,
-};
 use tracing::info;
 
-use crate::central_http::{
-    handle_decideur_forward, handle_health, handle_metrics, handle_proxy_announce,
-    handle_registry_status, handle_rotate, handle_vm_sync, middleware_token, CentralState,
-};
+use crate::central_grpc::demarrer_serveur_grpc;
+use crate::central_http::CentralState;
 use crate::central_registry::GestionnaireRegistry;
+use crate::central_rotation::tache_rotation_automatique_central;
 use crate::config::Config;
 
-/// Routeur de l'agent central (interface proxies ↔ Décideur).
-pub fn build_router(state: Arc<CentralState>) -> Router {
-    let api = Router::new()
-        .route("/registry/proxy/announce", post(handle_proxy_announce))
-        .route("/registry/vm/sync", post(handle_vm_sync))
-        .route("/registry/status", get(handle_registry_status))
-        .route("/credential/rotate", post(handle_rotate))
-        .route("/decideur/forward", post(handle_decideur_forward))
-        .layer(middleware::from_fn_with_state(
-            Arc::clone(&state),
-            middleware_token,
-        ));
-
-    let public = Router::new()
-        .route("/health", get(handle_health))
-        .route("/metrics", get(handle_metrics));
-
-    api.merge(public).with_state(state)
-}
-
-/// Prépare l'agent central (sans crypto VM locale — déléguée aux proxies).
-pub async fn preparer_agent(config: Config) -> (Arc<CentralState>, u16) {
+/// Prépare l'état partagé et lance les tâches de fond.
+pub async fn preparer_agent(config: Config) -> Arc<CentralState> {
     let registry = GestionnaireRegistry::nouveau(&config.chemin_registry);
 
     let state = Arc::new(CentralState {
         config: config.clone(),
         registry,
-        http: reqwest::Client::new(),
         requetes: std::sync::atomic::AtomicU64::new(0),
         erreurs: std::sync::atomic::AtomicU64::new(0),
         start_time: std::time::Instant::now(),
     });
 
+    if config.intervalle_rotation_sec > 0 {
+        let st_auto = Arc::clone(&state);
+        let intervalle = config.intervalle_rotation_sec;
+        tokio::spawn(async move {
+            tache_rotation_automatique_central(st_auto, intervalle).await;
+        });
+        info!(
+            "[Agent central] rotation automatique toutes les {}s",
+            config.intervalle_rotation_sec
+        );
+    }
+
+    let auditeur = config
+        .adresse_grpc_auditeur()
+        .map(|(h, p)| format!("{h}:{p}"))
+        .unwrap_or_else(|| "(non configuré)".to_string());
+
     info!(
-        "[Agent central] port={} — registre proxies, rotation, interface Décideur",
+        "[Agent central] gRPC mTLS :{} — Décideur + Auditeur ({auditeur})",
         config.agent_port
     );
 
-    (state, config.agent_port)
+    state
+}
+
+/// Démarre le serveur gRPC (bloquant).
+pub async fn executer_serveur_grpc(
+    state: Arc<CentralState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = state.config.grpc_socket_addr();
+    demarrer_serveur_grpc(state, addr).await
 }

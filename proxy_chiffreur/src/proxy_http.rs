@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -514,6 +514,7 @@ pub async fn handle_decrypt(
 
 pub async fn handle_rotate(
     State(st): State<SharedProxyState>,
+    headers: HeaderMap,
     body: Option<Json<Value>>,
 ) -> Response {
     st.inc_requetes();
@@ -523,6 +524,28 @@ pub async fn handle_rotate(
         .and_then(|v| v.as_str())
         .map(|s| s.to_owned())
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let token = headers
+        .get("X-Agent-Token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if token.is_empty() || token != st.config.agent_token {
+        st.inc_erreurs();
+        return err_rid(
+            if token.is_empty() {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::FORBIDDEN
+            },
+            &rid,
+            if token.is_empty() {
+                "TOKEN_MISSING"
+            } else {
+                "TOKEN_INVALID"
+            },
+            "X-Agent-Token invalide (appel attendu depuis l'agent central).",
+        );
+    }
 
     info!("[Proxy] POST /credential/rotate (rid={rid})");
     let rapport: RapportRotationVms =

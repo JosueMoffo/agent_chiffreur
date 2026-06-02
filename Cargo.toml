@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["gandal_common", "agent_chiffreur", "proxy_chiffreur"]

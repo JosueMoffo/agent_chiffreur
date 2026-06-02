@@ -18,7 +18,7 @@ use crate::proxy_cle_vm::ProxyVmSecret;
 use crate::proxy_http::{
     assurer_session_locale, handle_decrypt, handle_ecdh_initiate, handle_encrypt,
     handle_generate_password, handle_health, handle_proxy_inbound, handle_proxy_relay,
-    handle_proxy_sessions_list, handle_public_key, handle_rotate, handle_secret_strength,
+    handle_proxy_sessions_list, handle_public_key, handle_secret_strength,
     handle_vm_delete, handle_vm_list, handle_vm_purge_expired, handle_vm_session_register,
     ProxyState, SharedProxyState, CHEMIN_PROXY_SESSION_DEFAUT,
 };
@@ -39,7 +39,6 @@ pub fn build_router(state: SharedProxyState) -> Router {
         .route("/ecdh/initiate", post(handle_ecdh_initiate))
         .route("/password/generate", post(handle_generate_password))
         .route("/secret/strength", post(handle_secret_strength))
-        .route("/credential/rotate", post(handle_rotate))
         .route("/proxy/relay", post(handle_proxy_relay))
         .route("/proxy/inbound", post(handle_proxy_inbound))
         .route("/proxy/sessions", get(handle_proxy_sessions_list))
