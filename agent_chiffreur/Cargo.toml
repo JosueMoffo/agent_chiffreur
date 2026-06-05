@@ -51,3 +51,22 @@ dotenvy       = "0.15"
 opt-level = 3
 lto       = true
 codegen-units = 1
+
+# Paquet .deb — construction : cargo deb --release (voir ../build-deb.sh)
+[package.metadata.deb]
+name = "agent-chiffreur"
+maintainer = "ENSPY SMA 2025-2026 <sma@enspy.local>"
+copyright = "2026 ENSPY SMA"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+recommends = "systemd, openssl"
+maintainer-scripts = "debian"
+systemd-units = { unit-name = "agent-chiffreur.service", enable = false }
+assets = [
+    ["target/release/agent_chiffreur", "usr/bin/agent_chiffreur", "755"],
+    ["config/agent_config.example.json", "usr/share/agent-chiffreur/agent_config.example.json", "644"],
+    ["debian/README.packaging", "usr/share/doc/agent-chiffreur/README.packaging", "644"],
+    ["debian/agent_chiffreur.service", "lib/systemd/system/agent-chiffreur.service", "644"],
+    ["debian/agent-chiffreur.default", "etc/default/agent-chiffreur", "644"],
+]

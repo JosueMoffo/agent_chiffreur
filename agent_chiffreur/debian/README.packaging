@@ -1,0 +1,16 @@
+Agent Chiffreur ENSPY — paquet Debian
+
+Installation (machine cible, une commande) :
+  sudo apt install ./agent-chiffreur_*.deb
+
+Ou :
+  sudo dpkg -i agent-chiffreur_*.deb && sudo apt install -f
+
+Fichiers :
+  /usr/bin/agent_chiffreur
+  /etc/agent-chiffreur/agent_config.json
+  /var/lib/agent-chiffreur/data/
+  systemctl status agent_chiffreur
+
+Santé :
+  curl -s http://localhost:5004/health

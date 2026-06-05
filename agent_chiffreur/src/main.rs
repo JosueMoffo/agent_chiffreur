@@ -19,7 +19,8 @@ async fn main() {
 
     info!("=== AgentChiffreur v{} — démarrage ===", VERSION);
 
-    let config = Config::charger(None);
+    let config_path = std::env::var("AGENT_CONFIG").ok();
+    let config = Config::charger(config_path.as_deref());
     info!(
         "[Config] port central={} decideur='{}' registry='{}'",
         config.agent_port,

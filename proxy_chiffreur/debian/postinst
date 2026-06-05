@@ -1,0 +1,43 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if ! getent passwd proxy-chiffreur >/dev/null 2>&1; then
+            useradd --system --no-create-home --shell /usr/sbin/nologin proxy-chiffreur 2>/dev/null \
+                || adduser --system --no-create-home --disabled-login --group proxy-chiffreur 2>/dev/null \
+                || true
+        fi
+
+        mkdir -p /var/lib/proxy-chiffreur/data
+        mkdir -p /etc/proxy-chiffreur
+        chmod 750 /var/lib/proxy-chiffreur
+
+        if [ ! -f /etc/proxy-chiffreur/proxy_config.json ]; then
+            cp /usr/share/proxy-chiffreur/proxy_config.example.json /etc/proxy-chiffreur/proxy_config.json
+            chmod 640 /etc/proxy-chiffreur/proxy_config.json
+            echo ""
+            echo ">>> proxy-chiffreur : éditez /etc/proxy-chiffreur/proxy_config.json"
+            echo ">>> (local_vm_id, agent_central_url, agent_token, peers) puis :"
+            echo ">>>   sudo systemctl restart proxy_chiffreur"
+            echo ""
+        fi
+
+        chown -R proxy-chiffreur:proxy-chiffreur /var/lib/proxy-chiffreur 2>/dev/null || true
+        chown root:proxy-chiffreur /etc/proxy-chiffreur/proxy_config.json 2>/dev/null || true
+
+        if [ -d /run/systemd/system ]; then
+            deb-systemd-helper unmask proxy-chiffreur.service >/dev/null 2>&1 || true
+            deb-systemd-helper enable proxy-chiffreur.service >/dev/null 2>&1 || true
+            deb-systemd-helper start proxy-chiffreur.service >/dev/null 2>&1 || true
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+esac
+
+#DEBHELPER#
+
+exit 0

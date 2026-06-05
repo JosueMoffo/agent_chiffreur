@@ -1,0 +1,2 @@
+# Variables optionnelles — /etc/default/agent-chiffreur
+RUST_LOG=info

@@ -1,0 +1,3 @@
+# Variables optionnelles — /etc/default/proxy-chiffreur
+RUST_LOG=info
+PROXY_PURGE_AUTO=1

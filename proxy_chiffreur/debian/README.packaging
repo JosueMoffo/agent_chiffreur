@@ -1,0 +1,11 @@
+Proxy Chiffreur ENSPY — paquet Debian
+
+Installation (machine cible, une commande) :
+  sudo apt install ./proxy-chiffreur_*.deb
+
+Configurer avant prod :
+  sudo nano /etc/proxy-chiffreur/proxy_config.json
+  sudo systemctl restart proxy_chiffreur
+
+Santé :
+  curl -s http://localhost:8400/health

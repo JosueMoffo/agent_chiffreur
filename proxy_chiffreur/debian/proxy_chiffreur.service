@@ -1,0 +1,20 @@
+[Unit]
+Description=Proxy Chiffreur ENSPY (crypto VM, port 8400)
+Documentation=file:/usr/share/doc/proxy-chiffreur/README.packaging
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxy-chiffreur
+Group=proxy-chiffreur
+WorkingDirectory=/var/lib/proxy-chiffreur
+EnvironmentFile=-/etc/default/proxy-chiffreur
+Environment=PROXY_CONFIG=/etc/proxy-chiffreur/proxy_config.json
+ExecStart=/usr/bin/proxy_chiffreur
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

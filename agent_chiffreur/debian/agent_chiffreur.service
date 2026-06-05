@@ -1,0 +1,20 @@
+[Unit]
+Description=Agent Chiffreur central ENSPY (registre proxies, rotation)
+Documentation=file:/usr/share/doc/agent-chiffreur/README.packaging
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-chiffreur
+Group=agent-chiffreur
+WorkingDirectory=/var/lib/agent-chiffreur
+EnvironmentFile=-/etc/default/agent-chiffreur
+Environment=AGENT_CONFIG=/etc/agent-chiffreur/agent_config.json
+ExecStart=/usr/bin/agent_chiffreur
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

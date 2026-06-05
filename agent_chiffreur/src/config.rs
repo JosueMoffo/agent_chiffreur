@@ -107,8 +107,11 @@ impl Config {
     ///   2. Fichier `config/agent_config.json`
     ///   3. Valeurs par défaut codées dans le type `Config`
     pub fn charger(chemin: Option<&str>) -> Self {
-        let chemin = chemin.unwrap_or(CHEMIN_CONFIG);
-        let mut cfg = Self::depuis_fichier(chemin);
+        let chemin = chemin
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("AGENT_CONFIG").ok())
+            .unwrap_or_else(|| CHEMIN_CONFIG.to_string());
+        let mut cfg = Self::depuis_fichier(&chemin);
         cfg.appliquer_surcharges_env();
         cfg
     }

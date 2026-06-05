@@ -39,3 +39,21 @@ anyhow        = "1"
 opt-level = 3
 lto       = true
 codegen-units = 1
+
+[package.metadata.deb]
+name = "proxy-chiffreur"
+maintainer = "ENSPY SMA 2025-2026 <sma@enspy.local>"
+copyright = "2026 ENSPY SMA"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+recommends = "systemd"
+maintainer-scripts = "debian"
+systemd-units = { unit-name = "proxy-chiffreur.service", enable = false }
+assets = [
+    ["target/release/proxy_chiffreur", "usr/bin/proxy_chiffreur", "755"],
+    ["config/proxy_config.example.json", "usr/share/proxy-chiffreur/proxy_config.example.json", "644"],
+    ["debian/README.packaging", "usr/share/doc/proxy-chiffreur/README.packaging", "644"],
+    ["debian/proxy_chiffreur.service", "lib/systemd/system/proxy-chiffreur.service", "644"],
+    ["debian/proxy-chiffreur.default", "etc/default/proxy-chiffreur", "644"],
+]

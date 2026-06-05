@@ -1,0 +1,44 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if ! getent passwd agent-chiffreur >/dev/null 2>&1; then
+            useradd --system --no-create-home --shell /usr/sbin/nologin agent-chiffreur 2>/dev/null \
+                || adduser --system --no-create-home --disabled-login --group agent-chiffreur 2>/dev/null \
+                || true
+        fi
+
+        mkdir -p /var/lib/agent-chiffreur/data
+        mkdir -p /etc/agent-chiffreur
+        chmod 750 /var/lib/agent-chiffreur
+
+        if [ ! -f /etc/agent-chiffreur/agent_config.json ]; then
+            if command -v openssl >/dev/null 2>&1; then
+                TOKEN="$(openssl rand -hex 32)"
+            else
+                TOKEN="CHANGEZ-MOI-$(date +%s)"
+            fi
+            cp /usr/share/agent-chiffreur/agent_config.example.json /etc/agent-chiffreur/agent_config.json
+            sed -i "s/REMPLACER_PAR_TOKEN_ALEATOIRE_64_HEX/${TOKEN}/" /etc/agent-chiffreur/agent_config.json
+            chmod 640 /etc/agent-chiffreur/agent_config.json
+        fi
+
+        chown -R agent-chiffreur:agent-chiffreur /var/lib/agent-chiffreur 2>/dev/null || true
+        chown root:agent-chiffreur /etc/agent-chiffreur/agent_config.json 2>/dev/null || true
+
+        if [ -d /run/systemd/system ]; then
+            deb-systemd-helper unmask agent-chiffreur.service >/dev/null 2>&1 || true
+            deb-systemd-helper enable agent-chiffreur.service >/dev/null 2>&1 || true
+            deb-systemd-helper start agent-chiffreur.service >/dev/null 2>&1 || true
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+esac
+
+#DEBHELPER#
+
+exit 0
