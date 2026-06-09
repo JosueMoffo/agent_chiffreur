@@ -32,7 +32,7 @@ async fn main() {
     let app = build_router(state);
 
     // Démarrer la supervision de l'entropie en arrière-plan
-    tokio::spawn(agent_chiffreur::supervision::tache_supervision_entropie(config));
+    tokio::spawn(agent_chiffreur::supervision::tache_supervision_entropie(config.clone()));
 
     let addr = format!("0.0.0.0:{port}");
     

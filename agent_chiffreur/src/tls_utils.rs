@@ -113,11 +113,11 @@ fn load_private_key(path: &str) -> std::io::Result<PrivateKeyDer<'static>> {
     let file = fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(file);
     
-    // Essayer différents formats (PKCS8, RSA, SEC1)
+    // Version v2 : Les variantes utilisent désormais la nomenclature Pkcs1Key, Pkcs8Key et Sec1Key
     loop {
         match rustls_pemfile::read_one(&mut reader)? {
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return Ok(PrivateKeyDer::Pkcs1(key)),
             Some(rustls_pemfile::Item::Pkcs8Key(key)) => return Ok(PrivateKeyDer::Pkcs8(key)),
-            Some(rustls_pemfile::Item::RsaKey(key)) => return Ok(PrivateKeyDer::Pkcs1(key)),
             Some(rustls_pemfile::Item::Sec1Key(key)) => return Ok(PrivateKeyDer::Sec1(key)),
             None => break,
             _ => continue,

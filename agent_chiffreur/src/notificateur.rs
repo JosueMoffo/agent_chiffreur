@@ -47,7 +47,7 @@ pub async fn notifier_agent(url: &str, token: &str, payload: serde_json::Value, 
 
 /// Envoie une alerte/log à l'agent agent-auditeur si `agent_agent-auditeur_url` est configuré.
 pub async fn notifier_audit(config: &crate::config::Config, payload: serde_json::Value) {
-    if let Some(ref url) = config.agent_agent-auditeur_url {
+    if let Some(ref url) = config.agent_auditeur_url {
         notifier_agent(url, &config.agent_token, payload, Some(config)).await;
     }
 }
