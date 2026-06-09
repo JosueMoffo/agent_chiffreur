@@ -43,7 +43,7 @@ pub async fn preparer_agent(config: Config) -> (Arc<CentralState>, u16) {
     let state = Arc::new(CentralState {
         config: config.clone(),
         registry,
-        http: reqwest::Client::new(),
+        http: crate::tls_utils::build_mtls_client(&config),
         requetes: std::sync::atomic::AtomicU64::new(0),
         erreurs: std::sync::atomic::AtomicU64::new(0),
         start_time: std::time::Instant::now(),

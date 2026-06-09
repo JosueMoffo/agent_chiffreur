@@ -1,0 +1,2 @@
+[SAN]
+subjectAltName=DNS:agent-decideur,DNS:agent-decideur.gandal.svc.cluster.local,IP:10.43.0.3

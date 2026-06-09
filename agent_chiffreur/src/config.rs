@@ -17,7 +17,7 @@
 //!   "seuil_entropie": 256,
 //!   "chemin_session": "data/session.json",
 //!   "agent_auditeur_url": null,
-//!   "agents_connus": { "Decideur": "http://localhost:5003" }
+//!   "agents_connus": { "agent-decideur": "http://localhost:5003" }
 //! }
 //! ```
 
@@ -81,6 +81,18 @@ pub struct Config {
     /// Agents connus du SMA (map nom → URL).
     #[serde(default)]
     pub agents_connus: HashMap<String, String>,
+
+    /// Chemin du certificat CA pour la validation mTLS.
+    #[serde(default = "default_ca_cert_path")]
+    pub ca_cert_path: String,
+
+    /// Chemin du certificat de l'agent pour mTLS.
+    #[serde(default = "default_agent_cert_path")]
+    pub agent_cert_path: String,
+
+    /// Chemin de la clé privée de l'agent pour mTLS.
+    #[serde(default = "default_agent_key_path")]
+    pub agent_key_path: String,
 }
 
 // ── Valeurs par défaut ────────────────────────────────────────────────────────
@@ -89,12 +101,15 @@ fn default_chemin_registry() -> String { "data/central_registry.json".to_string(
 fn default_token()          -> String { "ENSPY-TOKEN-2026".to_string() }
 fn default_rotation_sec()   -> u64    { 300 }
 fn default_grace_sec()      -> u64    { 60 }
-fn default_agent_rotation() -> String { "Decideur".to_string() }
+fn default_agent_rotation() -> String { "agent-decideur".to_string() }
 fn default_supervision_sec()-> u64    { 10 }
 fn default_seuil_entropie() -> u32    { 256 }
 fn default_chemin_session() -> String {
     crate::sessions_vm::CHEMIN_SESSION_DEFAUT.to_string()
 }
+fn default_ca_cert_path() -> String { "certs/ca.crt".to_string() }
+fn default_agent_cert_path() -> String { "certs/agent-chiffreur.crt".to_string() }
+fn default_agent_key_path() -> String { "certs/agent-chiffreur.key".to_string() }
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 
@@ -167,6 +182,15 @@ impl Config {
         if let Ok(v) = std::env::var("AGENT_AUDITEUR_URL") {
             self.agent_auditeur_url = Some(v);
         }
+        if let Ok(v) = std::env::var("AGENT_CA_CERT_PATH") {
+            self.ca_cert_path = v;
+        }
+        if let Ok(v) = std::env::var("AGENT_CERT_PATH") {
+            self.agent_cert_path = v;
+        }
+        if let Ok(v) = std::env::var("AGENT_KEY_PATH") {
+            self.agent_key_path = v;
+        }
     }
 
     /// Sauvegarde la configuration courante dans le fichier JSON.
@@ -198,6 +222,9 @@ impl Default for Config {
             chemin_session: default_chemin_session(),
             agent_auditeur_url: None,
             agents_connus: HashMap::new(),
+            ca_cert_path: default_ca_cert_path(),
+            agent_cert_path: default_agent_cert_path(),
+            agent_key_path: default_agent_key_path(),
         }
     }
 }

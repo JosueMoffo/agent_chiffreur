@@ -262,6 +262,14 @@ pub async fn handle_rotate(
         }
     }
 
+    // Audit de la rotation vers l'agent agent-auditeur
+    crate::supervision::auditer_rotation(
+        &st.config,
+        if ok_count > 0 { "success" } else { "failed" },
+        proxies.len(),
+        ok_count as usize,
+    ).await;
+
     (
         StatusCode::OK,
         Json(json!({

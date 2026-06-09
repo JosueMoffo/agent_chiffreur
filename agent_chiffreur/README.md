@@ -50,7 +50,7 @@ proxy_chiffreur :8400  (encrypt, decrypt, /vm/session/register, /proxy/relay)
 | `AGENT_AES_KEY_HEX` | *(éphémère)* | Clé AES-256 persistante (64 hex chars = 32 octets) |
 | `AGENT_SUPERVISION_SEC` | `10` | Intervalle supervision entropie (secondes) |
 | `AGENT_ENTROPIE_SEUIL` | `256` | Seuil critique pool entropie (octets) |
-| `AGENT_AUDITEUR_URL` | *(absent)* | URL HTTP de l'agent auditeur |
+| `AGENT_AUDITEUR_URL` | *(absent)* | URL HTTP de l'agent agent-auditeur |
 | `AGENT_CONNUS` | *(absent)* | Autres agents : `"nom1=url1,nom2=url2"` |
 | `AGENT_SESSION_FILE` | `data/session.json` | Base de données des clés VM |
 
@@ -65,7 +65,7 @@ cargo build --release
 # Démarrage du serveur (port 5004 par défaut)
 ./target/release/agent_chiffreur
 
-# Avec clé AES persistante et agent auditeur configuré
+# Avec clé AES persistante et agent agent-auditeur configuré
 AGENT_AES_KEY_HEX="a1b2c3...64chars..." \
 AGENT_AUDITEUR_URL="http://localhost:8500/alert" \
 ./target/release/agent_chiffreur
@@ -125,7 +125,7 @@ curl http://localhost:5004/public-key
 curl -X POST http://localhost:5004/ecdh/initiate \
   -H "X-Agent-Token: $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"peer_agent_id": "Decideur", "peer_public_key_hex": "b2c4...64chars..."}'
+  -d '{"peer_agent_id": "agent-decideur", "peer_public_key_hex": "b2c4...64chars..."}'
 
 # POST /password/generate
 curl -X POST http://localhost:5004/password/generate \
@@ -165,7 +165,7 @@ GET /public-key
 ```bash
 POST /ecdh/initiate
 X-Agent-Token: ENSPY-TOKEN-2026
-{ "peer_agent_id": "Decideur", "peer_public_key_hex": "<votre_clé_publique_hex>" }
+{ "peer_agent_id": "agent-decideur", "peer_public_key_hex": "<votre_clé_publique_hex>" }
 # Réponse : { "shared_secret_hex": "f1e2...64 chars..." }
 ```
 
@@ -224,7 +224,7 @@ cargo run --bin simulation_tests
 | Scénario | Opération | Entrée | Résultat attendu |
 |---|---|---|---|
 | **0** | Sans token | n/a | HTTP 200 — token optionnel (toute valeur acceptée) |
-| **A** | TEST_STRENGTH | secret faible `"abc"` | score=0, alerte MEDIUM à l'auditeur |
+| **A** | TEST_STRENGTH | secret faible `"abc"` | score=0, alerte MEDIUM à l'agent-auditeur |
 | **B** | TEST_STRENGTH | secret fort `"Tr0ub4dor&3_ENSPY!2026#"` | score ≥ 60, aucune alerte |
 | **C** | ENCRYPT_DATA | texte long (237 chars) | `ciphertext` + `iv` + `auth_tag` Base64 |
 | **D** | DECRYPT_DATA | résultat scénario C | texte original récupéré à l'identique |

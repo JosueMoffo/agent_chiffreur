@@ -11,16 +11,14 @@ use tracing::{error, info};
 /// En cas d'échec réseau, log l'erreur sans paniquer (best-effort).
 ///
 /// # SECURITY: ne pas logguer le payload brut s'il contient des secrets
-pub async fn notifier_agent(url: &str, token: &str, payload: serde_json::Value) {
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!("[NOTIFICATEUR] Impossible de créer le client HTTP : {}", e);
-            return;
-        }
+pub async fn notifier_agent(url: &str, token: &str, payload: serde_json::Value, config: Option<&crate::config::Config>) {
+    let client = if let Some(cfg) = config {
+        crate::tls_utils::build_mtls_client(cfg)
+    } else {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
     };
 
     match client
@@ -44,5 +42,12 @@ pub async fn notifier_agent(url: &str, token: &str, payload: serde_json::Value) 
                 url, e
             );
         }
+    }
+}
+
+/// Envoie une alerte/log à l'agent agent-auditeur si `agent_agent-auditeur_url` est configuré.
+pub async fn notifier_audit(config: &crate::config::Config, payload: serde_json::Value) {
+    if let Some(ref url) = config.agent_agent-auditeur_url {
+        notifier_agent(url, &config.agent_token, payload, Some(config)).await;
     }
 }

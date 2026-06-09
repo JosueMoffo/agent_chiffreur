@@ -1,0 +1,662 @@
+Voici un **plan de tests complet**, commande par commande, aligné sur ta config actuelle.
+
+---
+
+## Carte réseau de référence
+
+| Machine | IP | Rôle |
+|---|---|---|
+| Emir (K8s) | `192.168.123.110(.100 si echec)` | 5 agents + serveur .deb |
+| Filtreur (VM Linux) | `192.168.123.200` | Capture + blocage |
+| pfSense | `192.168.123.1` | Routeur / Internet |
+| VM Omega (ex.) | `192.168.123.50` | proxy-analyseur + proxy-chiffreur |
+
+| Service | IP:Port | Protocole |
+|---|---|---|
+| Analyseur gRPC mTLS | `110:5002` | Auditeur |
+| Analyseur gRPC plain | `110:5012` | **Proxy EnvoyerLog** |
+| Analyseur HTTP | `110:5009` | Simulateur |
+| Décideur gRPC | `110:5003` | Agents |
+| Décideur HTTP | `110:5013` | Analyseur `/alert` |
+| Chiffreur gRPC | `110:5004` | Décideur |
+| Chiffreur HTTP | `110:5014` | proxy_chiffreur |
+| Auditeur gRPC | `110:5005` | Tous |
+| Simulateur gRPC | `110:5006` | Décideur |
+| Simulateur UI | `110:5016` | Navigateur |
+| Filtreur gRPC | `200:5001` | Décideur / Auditeur |
+| Proxy contrôle | `VM:5007` | Décideur → IsolerVM |
+| Proxy chiffreur | `VM:8400` | Crypto inter-VM |
+| Serveur .deb | `110:8000` | cloud-init |
+
+---
+
+## 0 — Prérequis (sur Kali)
+
+```bash
+export EMIR=192.168.123.110
+export FILTREUR=192.168.123.200
+export VM=192.168.123.50
+export TOKEN="ENSPY-TOKEN-2026"
+export CERTS=/tmp/gandal-certs
+```
+
+```bash
+sudo apt-get install -y curl jq netcat-openbsd grpcurl python3 python3-grpcio python3-grpcio-tools
+```
+
+Si les certs ne sont pas encore sur Kali :
+
+```bash
+mkdir -p $CERTS
+scp root@$EMIR:/tmp/gandal-certs/* $CERTS/
+```
+
+---
+
+## 1 — Sanity check : pods et ports
+
+### 1.1 Pods K8s (sur Emir)
+
+```bash
+kubectl get pods -n gandal -o wide
+```
+
+**Attendu :** 6 pods `Running 1/1` (5 agents + deb-server).
+
+```bash
+kubectl get svc -n gandal
+```
+
+**Attendu :** NodePorts `5002–5006`, `5013–5016`, `8000`.
+
+### 1.2 Matrice TCP (depuis Kali)
+
+```bash
+for p in 5002 5012 5003 5013 5004 5014 5005 5006 5016 5009 8000; do
+  nc -zv $EMIR $p 2>&1 | grep -E "succeeded|open" && echo "OK $p" || echo "FAIL $p"
+done
+```
+
+```bash
+nc -zv $FILTREUR 5001 2>&1
+```
+
+**Attendu :** tous `open/succeeded`. Si un port échoue → service K8s ou firewall.
+
+---
+
+## 2 — Tests HTTP (endpoints REST)
+
+### 2.1 Analyseur — `/health`
+
+```bash
+curl -s http://$EMIR:5009/health | jq .
+```
+
+**Attendu :** `"status":"ok"`, `"agent":"analyseur"`.
+
+### 2.2 Analyseur — `/simulation/mode`
+
+```bash
+curl -s -X POST http://$EMIR:5009/simulation/mode \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"event":"START"}}' | jq .
+```
+
+**Attendu :** `"status":"ok"`, `"event":"START"`.
+
+### 2.3 Décideur — `/health`
+
+```bash
+curl -s http://$EMIR:5013/health | jq .
+```
+
+**Attendu :** JSON avec statut opérationnel.
+
+### 2.4 Décideur — `/metrics`
+
+```bash
+curl -s http://$EMIR:5013/metrics | jq .
+```
+
+### 2.5 Chiffreur — `/health`
+
+```bash
+curl -s http://$EMIR:5014/health | jq .
+```
+
+**Attendu :** `"status":"ok"`.
+
+### 2.6 Chiffreur — `/registry/status`
+
+```bash
+curl -s http://$EMIR:5014/registry/status | jq .
+```
+
+### 2.7 Simulateur — UI
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://$EMIR:5016/
+```
+
+**Attendu :** `200` ou `302`.
+
+### 2.8 Serveur .deb
+
+```bash
+curl -s http://$EMIR:8000/ | head -20
+```
+
+**Attendu :** listing avec `proxy-analyseur.deb`, `proxy-chiffreur.deb`.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://$EMIR:8000/proxy-analyseur.deb
+```
+
+**Attendu :** `200`.
+
+---
+
+## 3 — Tests gRPC agents (avec grpcurl + mTLS)
+
+### 3.1 Chiffreur — `GetHealth` (port 5004)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  $EMIR:5004 agents.AgentChiffreur/GetHealth
+```
+
+**Attendu :** `"statut":"ok"`.
+
+### 3.2 Décideur — `GetHealth` (port 5003)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/analyseur.crt -key $CERTS/analyseur.key \
+  $EMIR:5003 decideur.AgentDecideur/GetHealth
+```
+
+### 3.3 Simulateur — `GetHealth` (port 5006)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  $EMIR:5006 agents.AgentSimulateur/GetHealth
+```
+
+### 3.4 Auditeur — `GetHealth` (port 5005)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  $EMIR:5005 agents.AgentAuditeur/GetHealth
+```
+
+### 3.5 Filtreur — `GetHealth` (port 5001, depuis Kali)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  -H "x-agent-token: $TOKEN" \
+  $FILTREUR:5001 agents.AgentFiltreur/GetHealth
+```
+
+**Attendu :** `"statut":"ok"`, uptime > 0.
+
+---
+
+## 4 — Tests Proxy → Analyseur (point critique)
+
+L'Analyseur expose **deux** ports gRPC :
+- `5002` = mTLS (Auditeur)
+- `5012` = plain + header `X-Agent-Token` (Proxy)
+
+Le `.deb` proxy-analyseur est configuré sur `ANALYSEUR_PORT=5002` avec mTLS — **incompatible** avec le serveur plain. Vérifie les deux cas :
+
+### 4.1 Test correct — Proxy → Analyseur port **5012**
+
+```bash
+grpcurl -plaintext \
+  -H "x-agent-token: $TOKEN" \
+  -d '{
+    "srcip":"192.168.123.50",
+    "dstip":"8.8.8.8",
+    "protocol":"TCP",
+    "port":"443",
+    "vm_id":"9101",
+    "timestamp": 1710000000.0
+  }' \
+  $EMIR:5012 analyseur.AgentAnalyseur/EnvoyerLog
+```
+
+**Attendu :** `"statut":"ok"` ou détail d'anomalie. Pas `UNAUTHENTICATED`.
+
+Si `UNAUTHENTICATED` → le token dans `/opt/gandal/proxy_token` du pod analyseur ne correspond pas à `$TOKEN`. Vérifie :
+
+```bash
+kubectl exec -n gandal deploy/agent-analyseur -- cat /opt/gandal/proxy_token 2>/dev/null || \
+kubectl logs -n gandal deploy/agent-analyseur | grep -i token
+```
+
+### 4.2 Test actuel du .deb — port **5002** (doit échouer si mal configuré)
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/simulateur.crt -key $CERTS/simulateur.key \
+  -d '{"srcip":"192.168.123.50","dstip":"8.8.8.8","protocol":"TCP","port":"443","vm_id":"9101","timestamp":1710000000.0}' \
+  $EMIR:5002 analyseur.AgentAnalyseur/EnvoyerLog
+```
+
+**Attendu si proxy.env corrigé :** OK avec cert `simulateur`.  
+**Si échec :** corrige sur la VM :
+
+```bash
+# Sur la VM proxy
+sed -i 's/ANALYSEUR_PORT=5002/ANALYSEUR_PORT=5012/' /etc/gandal-proxy/proxy.env
+systemctl restart gandal-proxy
+journalctl -u gandal-proxy -f
+```
+
+### 4.3 Depuis la VM — logs proxy-analyseur
+
+```bash
+ssh root@$VM "systemctl status gandal-proxy"
+```
+
+```bash
+ssh root@$VM "journalctl -u gandal-proxy --since '5 min ago' | tail -30"
+```
+
+**Attendu :** lignes `-> 8.8.8.8:443 TCP` sans `Analyseur gRPC indisponible`.
+
+---
+
+## 5 — Tests Proxy → Chiffreur (HTTP port 5014)
+
+### 5.1 Depuis Kali — annonce proxy
+
+```bash
+curl -s -X POST http://$EMIR:5014/registry/proxy/announce \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-Token: $TOKEN" \
+  -d '{
+    "vm_id": 9101,
+    "proxy_url": "http://'"$VM"':8400",
+    "public_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+  }' | jq .
+```
+
+**Attendu :** `"status":"ok"`.
+
+### 5.2 Depuis la VM — proxy_chiffreur local
+
+```bash
+ssh root@$VM "curl -s http://127.0.0.1:8400/health | jq ."
+```
+
+**Attendu :** statut OK.
+
+```bash
+ssh root@$VM "curl -s http://127.0.0.1:8400/public-key | jq ."
+```
+
+### 5.3 VM → conteneur chiffreur (réseau)
+
+```bash
+ssh root@$VM "curl -s -o /dev/null -w '%{http_code}\n' http://$EMIR:5014/health"
+```
+
+**Attendu :** `200`. Si timeout → firewall VM ou NodePort K8s.
+
+### 5.4 Config proxy_chiffreur sur VM
+
+```bash
+ssh root@$VM "grep agent_central_url /etc/gandal-proxy/proxy-chiffreur.env 2>/dev/null || \
+  grep agent_central_url /etc/proxy-chiffreur/proxy_config.json 2>/dev/null"
+```
+
+**Attendu :** `http://192.168.123.110:5014`.
+
+---
+
+## 6 — Tests Décideur → Proxy VM (isolation)
+
+### 6.1 Vérifier que le proxy écoute sur 5007
+
+```bash
+ssh root@$VM "ss -tlnp | grep 5007"
+```
+
+### 6.2 `VerifierSante` depuis Kali (cert decideur → proxy VM)
+
+Sur Kali, crée un script Python minimal (stubs déjà dans le .deb sur la VM). Plus simple : **depuis la VM** :
+
+```bash
+ssh root@$VM 'python3 - << "PY"
+import grpc, controleur_pb2, controleur_pb2_grpc, os
+
+PKI = "/etc/gandal-proxy/pki"
+with open(f"{PKI}/ca/ca.crt","rb") as f: ca = f.read()
+with open(f"{PKI}/simulateur/simulateur.crt","rb") as f: crt = f.read()
+with open(f"{PKI}/simulateur/simulateur.key","rb") as f: key = f.read()
+
+creds = grpc.ssl_channel_credentials(ca, key, crt)
+ch = grpc.secure_channel("127.0.0.1:5007", creds)
+stub = controleur_pb2_grpc.ControleProxyStub(ch)
+rep = stub.VerifierSante(controleur_pb2.RequeteSante())
+print("status:", rep.status, "agent:", rep.agent, "isolee:", rep.isolee)
+PY'
+```
+
+**Attendu :** `status: ok`, `isolee: False`.
+
+### 6.3 `IsolerVM` (test réel — attention, coupe le réseau VM)
+
+```bash
+ssh root@$VM 'python3 - << "PY"
+import grpc, controleur_pb2, controleur_pb2_grpc
+
+PKI = "/etc/gandal-proxy/pki"
+with open(f"{PKI}/ca/ca.crt","rb") as f: ca = f.read()
+with open(f"{PKI}/simulateur/simulateur.crt","rb") as f: crt = f.read()
+with open(f"{PKI}/simulateur/simulateur.key","rb") as f: key = f.read()
+
+creds = grpc.ssl_channel_credentials(ca, key, crt)
+ch = grpc.secure_channel("127.0.0.1:5007", creds)
+stub = controleur_pb2_grpc.ControleProxyStub(ch)
+rep = stub.IsolerVM(controleur_pb2.OrdreIsolation(
+    alert_id="test-001", vm_id="", raison="test GANDAL"))
+print(rep.status, rep.detail)
+PY'
+```
+
+**Attendu :** `ok` + message isolation (si Proxmox configuré). Sinon `erreur` + `API Proxmox non configurée` — normal en lab sans token Proxmox.
+
+### 6.4 Depuis le pod Décideur → proxy VM:5007
+
+```bash
+kubectl exec -n gandal deploy/agent-decideur -- \
+  sh -c 'nc -zv '"$VM"' 5007 2>&1'
+```
+
+**Attendu :** connexion ouverte.
+
+---
+
+## 7 — Tests Filtreur
+
+### 7.1 Service actif
+
+```bash
+ssh root@$FILTREUR "systemctl status agent-filtreur"
+```
+
+```bash
+ssh root@$FILTREUR "journalctl -u agent-filtreur --since '10 min ago' | grep -E 'Canal gRPC|en écoute|anti-SCP'"
+```
+
+**Attendu :**
+- `Canal gRPC mTLS → Décideur configuré`
+- `Règle anti-SCP sortant activée`
+
+### 7.2 Règle anti-SCP (FORWARD)
+
+```bash
+ssh root@$FILTREUR "iptables -L FORWARD -n -v | grep 'tcp dpt:22'"
+```
+
+**Attendu :** règle DROP sur `192.168.123.0/24` sortant.
+
+### 7.3 Test blocage SCP réel (depuis une VM)
+
+```bash
+ssh root@$VM "timeout 5 scp -o StrictHostKeyChecking=no /etc/hostname root@8.8.8.8:/tmp/ 2>&1 || true"
+```
+
+**Attendu :** timeout ou connexion refusée (si le trafic passe par le filtreur).
+
+### 7.4 Décideur → Filtreur `BlockIp`
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  -H "x-agent-token: $TOKEN" \
+  -d '{
+    "order_id":"TEST-BLOCK-001",
+    "incident_id":"INC-001",
+    "ip":"192.168.123.99",
+    "raison":"test manuel",
+    "duree":300,
+    "priority":1,
+    "revert_condition":"manual"
+  }' \
+  $FILTREUR:5001 agents.AgentFiltreur/BlockIp
+```
+
+**Attendu :** `"statut":"APPLIQUE"`.
+
+Vérifie iptables sur le filtreur :
+
+```bash
+ssh root@$FILTREUR "iptables -L INPUT -n | grep 192.168.123.99"
+```
+
+### 7.5 Déblocage
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  -H "x-agent-token: $TOKEN" \
+  -d '{"order_id":"TEST-UNBLOCK-001","incident_id":"INC-001","ip":"192.168.123.99","raison":"fin test","authorized_by":"admin"}' \
+  $FILTREUR:5001 agents.AgentFiltreur/UnblockIp
+```
+
+**Attendu :** `"statut":"DEBLOQUE"`.
+
+### 7.6 Filtreur → Décideur (alerte)
+
+Simule du trafic suspect depuis une VM vers internet, puis vérifie les logs :
+
+```bash
+ssh root@$VM "curl -s --max-time 3 http://malware.test.eicar.org 2>&1 || true"
+```
+
+```bash
+ssh root@$FILTREUR "journalctl -u agent-filtreur --since '2 min ago' | grep -E 'Alerte|Décideur|ReceiveAlert'"
+```
+
+```bash
+kubectl logs -n gandal deploy/agent-decideur --since=5m | grep -i alert
+```
+
+---
+
+## 8 — Tests inter-agents dans le cluster
+
+### 8.1 Décideur health-check de tous les agents
+
+```bash
+kubectl logs -n gandal deploy/agent-decideur --since=10m | grep -E 'health|Health|filtreur|chiffreur|analyseur|agent-auditeur|simulateur'
+```
+
+**Attendu :** pas de boucle de crash, mentions de health OK ou timeout filtreur si VM down.
+
+### 8.2 Analyseur → Décideur (alerte gRPC)
+
+Envoie un log qui déclenche une anomalie (port SSH répété, etc.) via 5012, puis :
+
+```bash
+kubectl logs -n gandal deploy/agent-analyseur --since=2m | tail -20
+```
+
+```bash
+kubectl logs -n gandal deploy/agent-decideur --since=2m | grep -i ReceiveAlert
+```
+
+### 8.3 Décideur → Chiffreur `RotateSecret`
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  -H "x-agent-token: $TOKEN" \
+  -d '{"request_id":"rot-test-001","agent_id":"decideur","reason":"test"}' \
+  $EMIR:5004 agents.AgentChiffreur/RotateSecret
+```
+
+**Attendu :** réponse OK avec statut rotation.
+
+### 8.4 Auditeur → Analyseur `ReloadAnomalies`
+
+```bash
+grpcurl -cacert $CERTS/ca.crt \
+  -cert $CERTS/agent-auditeur.crt -key $CERTS/agent-auditeur.key \
+  -d '{"demandeur":"agent-auditeur-test"}' \
+  $EMIR:5002 analyseur.AgentAnalyseur/ReloadAnomalies
+```
+
+---
+
+## 9 — Scénarios bout-en-bout (E2E)
+
+### Scénario A — VM proxy → Analyseur → Décideur
+
+1. Sur VM : `journalctl -u gandal-proxy -f`
+2. Génère du trafic : `curl http://example.com` depuis la VM
+3. Vérifie proxy collecte et envoie
+4. Vérifie logs analyseur + decideur
+
+```bash
+kubectl logs -n gandal deploy/agent-analyseur -f &
+kubectl logs -n gandal deploy/agent-decideur -f &
+# puis trafic depuis VM
+```
+
+### Scénario B — Filtreur détecte → Décideur reçoit
+
+1. Filtreur capture sur `eth0`
+2. Trafic anormal (scan ports, volume élevé)
+3. Alerte dans logs filtreur + decideur
+
+### Scénario C — Décideur ordonne isolation VM
+
+1. Alerte CRITICAL sur une VM
+2. Décideur appelle proxy VM:5007 `IsolerVM`
+3. Vérifie `isolee: true` via `VerifierSante`
+
+### Scénario D — Rotation clés chiffreur
+
+1. Décideur `RotateSecret` → chiffreur gRPC 5004
+2. proxy_chiffreur reçoit notification via HTTP 5014
+3. Vérifie `/credential/rotate` sur proxy local 8400
+
+```bash
+ssh root@$VM "curl -s -X POST http://127.0.0.1:8400/credential/rotate \
+  -H 'Content-Type: application/json' \
+  -d '{\"vm_id\":9101}' | jq ."
+```
+
+### Scénario E — cloud-init récupère .deb + certs
+
+Simule ce que fait `create-omega-vm.sh` :
+
+```bash
+curl -s -o /tmp/pa.deb http://$EMIR:8000/proxy-analyseur.deb && ls -lh /tmp/pa.deb
+```
+
+```bash
+curl -s -o /tmp/pc.deb http://$EMIR:8000/proxy-chiffreur.deb && ls -lh /tmp/pc.deb
+```
+
+---
+
+## 10 — Script de test automatique (Kali)
+
+Enregistre et lance :
+
+```bash
+cat > /tmp/gandal-test-all.sh << 'SCRIPT'
+#!/usr/bin/env bash
+set -uo pipefail
+EMIR=${EMIR:-192.168.123.110}
+FILTREUR=${FILTREUR:-192.168.123.200}
+TOKEN=${TOKEN:-ENSPY-TOKEN-2026}
+CERTS=${CERTS:-/tmp/gandal-certs}
+PASS=0; FAIL=0
+
+ok()  { echo "  ✅ $1"; PASS=$((PASS+1)); }
+ko()  { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
+
+check_tcp() {
+  nc -z -w2 "$1" "$2" 2>/dev/null && ok "TCP $1:$2" || ko "TCP $1:$2"
+}
+check_http() {
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$1")
+  [[ "$code" =~ ^2 ]] && ok "HTTP $1 → $code" || ko "HTTP $1 → $code"
+}
+
+echo "=== GANDAL TEST SUITE ==="
+echo "--- Ports Emir ---"
+for p in 5002 5012 5003 5013 5004 5014 5005 5006 5009 5016 8000; do
+  check_tcp $EMIR $p
+done
+check_tcp $FILTREUR 5001
+
+echo "--- HTTP ---"
+check_http "http://$EMIR:5009/health"
+check_http "http://$EMIR:5013/health"
+check_http "http://$EMIR:5014/health"
+check_http "http://$EMIR:8000/"
+
+echo "--- gRPC ---"
+grpcurl -cacert $CERTS/ca.crt -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  $EMIR:5004 agents.AgentChiffreur/GetHealth >/dev/null 2>&1 \
+  && ok "Chiffreur GetHealth" || ko "Chiffreur GetHealth"
+
+grpcurl -plaintext -H "x-agent-token: $TOKEN" \
+  -d '{"srcip":"10.0.0.1","dstip":"8.8.8.8","protocol":"TCP","port":"443","vm_id":"test","timestamp":1710000000}' \
+  $EMIR:5012 analyseur.AgentAnalyseur/EnvoyerLog >/dev/null 2>&1 \
+  && ok "Proxy→Analyseur EnvoyerLog (5012)" || ko "Proxy→Analyseur EnvoyerLog (5012)"
+
+grpcurl -cacert $CERTS/ca.crt -cert $CERTS/decideur.crt -key $CERTS/decideur.key \
+  -H "x-agent-token: $TOKEN" $FILTREUR:5001 agents.AgentFiltreur/GetHealth >/dev/null 2>&1 \
+  && ok "Filtreur GetHealth" || ko "Filtreur GetHealth"
+
+echo ""
+echo "Résultat : $PASS OK / $FAIL FAIL"
+[[ $FAIL -eq 0 ]] && exit 0 || exit 1
+SCRIPT
+chmod +x /tmp/gandal-test-all.sh
+/tmp/gandal-test-all.sh
+```
+
+---
+
+## 11 — Tableau de diagnostic rapide
+
+| Symptôme | Cause probable | Commande diagnostic |
+|---|---|---|
+| Proxy `UNAVAILABLE` sur 5002 | Mauvais port (doit être **5012**) | `grep ANALYSEUR_PORT /etc/gandal-proxy/proxy.env` |
+| `UNAUTHENTICATED` sur 5012 | Token proxy incorrect | `kubectl exec ... cat /opt/gandal/proxy_token` |
+| Filtreur `connection refused` | Service down ou mauvaise IP | `systemctl status agent-filtreur` |
+| Chiffreur HTTP timeout | NodePort 5014 absent | `kubectl get svc svc-chiffreur -n gandal` |
+| IsolerVM échoue | Proxmox token absent | `grep PROXMOX /etc/gandal-proxy/proxy.env` |
+| .deb 404 | deb-server vide | `ls /opt/gandal-debs/` sur Emir |
+| mTLS handshake fail | SAN cert incorrect | `openssl x509 -in $CERTS/decideur.crt -text \| grep DNS` |
+
+---
+
+## Point important à corriger avant les tests proxy
+
+Sur chaque VM, le `proxy.env` doit avoir :
+
+```bash
+ANALYSEUR_HOST=192.168.123.110
+ANALYSEUR_PORT=5012
+```
+
+Et l'Analyseur doit avoir le même token que les proxies dans `/opt/gandal/proxy_token` du pod.
+
+Sans ça, le **Scénario A** échouera même si tout le reste fonctionne.
+
+Si tu veux, je peux te générer un script `gandal-e2e-test.sh` complet à placer dans le repo, avec rapport JSON à la fin.

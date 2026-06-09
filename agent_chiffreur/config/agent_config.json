@@ -5,13 +5,13 @@
   "agent_token": "d8d137d13f5f5b3fdeafd9b389ae241b9a61a5362a753c162047bd5772f6dd7c",
   "intervalle_rotation_sec": 300,
   "old_key_grace_sec": 60,
-  "agent_rotation_autorise": "Decideur",
+  "agent_rotation_autorise": "agent-decideur",
   "intervalle_supervision_sec": 10,
   "seuil_entropie": 256,
   "chemin_session": "data/session.json",
   "agent_auditeur_url": null,
   "agents_connus": {
-    "Decideur": "http://localhost:5003",
-    "auditeur": "http://localhost:8500"
+    "agent-decideur": "http://localhost:5003",
+    "agent-auditeur": "http://localhost:8500"
   }
 }

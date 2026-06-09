@@ -507,7 +507,7 @@ pub async fn handle_rotate(
 
     let rapport: RapportRotationVms = effectuer_rotation_toutes_vms(
         Arc::clone(&state.sessions_vm),
-        &state.config.agent_token,
+        &state.config,
     ).await;
 
     (StatusCode::OK, Json(json!({
@@ -635,6 +635,24 @@ pub async fn handle_secret_strength(
     };
 
     let force = state.crypto.evaluer_force(secret);
+    
+    // Alerte si secret trop faible ( politique ENSPY < 60 pts )
+    if force.score < 60 {
+        let alerte = serde_json::json!({
+            "request_id": uuid::Uuid::new_v4().to_string(),
+            "message_type": "log_event",
+            "source_agent": "chiffreur",
+            "event_type": "WEAK_SECRET_DETECTED",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "data": {
+                "severity": "MEDIUM",
+                "score": force.score,
+                "threshold": 60
+            }
+        });
+        crate::notificateur::notifier_audit(&state.config, alerte).await;
+    }
+
     (StatusCode::OK, Json(json!({
         "request_id": rid,
         "message_type": "secret_strength_response",

@@ -1,0 +1,2 @@
+[SAN]
+subjectAltName=DNS:agent-auditeur,DNS:agent-auditeur.gandal.svc.cluster.local,IP:10.43.0.5

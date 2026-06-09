@@ -79,7 +79,7 @@ pub struct RapportRotationVms {
 /// # SECURITY: le `new_key_hex` n'est jamais loggué
 pub async fn effectuer_rotation_toutes_vms(
     gestionnaire: Arc<GestionnaireSessionsVm>,
-    agent_token: &str,
+    config: &crate::config::Config,
 ) -> RapportRotationVms {
     let rotation_id = Uuid::new_v4().to_string();
     let timestamp = Utc::now();
@@ -108,7 +108,7 @@ pub async fn effectuer_rotation_toutes_vms(
     // Traiter chaque VM
     for resume in &sessions {
         let vm_id = resume.vm_id;
-        let res = roter_une_vm(gestionnaire.as_ref(), agent_token, vm_id, &rotation_id).await;
+        let res = roter_une_vm(gestionnaire.as_ref(), config, vm_id, &rotation_id).await;
         resultats.push(res);
     }
 
@@ -137,7 +137,7 @@ pub async fn effectuer_rotation_toutes_vms(
 /// # SECURITY: le `nouveau_secret_hex` n'est jamais loggué
 async fn roter_une_vm(
     gestionnaire: &GestionnaireSessionsVm,
-    agent_token: &str,
+    config: &crate::config::Config,
     vm_id: u32,
     rotation_id: &str,
 ) -> ResultatRotationVm {
@@ -231,7 +231,7 @@ async fn roter_une_vm(
         });
 
         info!("[ROTATION VMs] Notification → vm_id={} url='{}'", vm_id, url);
-        notifier_agent(url, agent_token, payload).await;
+        notifier_agent(url, &config.agent_token, payload, Some(config)).await;
         notifiee = true;
     } else {
         warn!(
@@ -257,7 +257,7 @@ async fn roter_une_vm(
 /// L'intervalle est lu depuis la config (`AGENT_ROTATION_SEC`, défaut 300s).
 pub async fn tache_rotation_vms_automatique(
     gestionnaire: Arc<GestionnaireSessionsVm>,
-    agent_token: String,
+    config: crate::config::Config,
     intervalle_sec: u64,
 ) {
     info!(
@@ -271,7 +271,7 @@ pub async fn tache_rotation_vms_automatique(
         interval.tick().await;
         info!("[ROTATION AUTO VMs] Déclenchement rotation automatique...");
         let rapport =
-            effectuer_rotation_toutes_vms(Arc::clone(&gestionnaire), &agent_token).await;
+            effectuer_rotation_toutes_vms(Arc::clone(&gestionnaire), &config).await;
 
         if rapport.vms_total == 0 {
             info!("[ROTATION AUTO VMs] Aucune VM enregistrée — pas de rotation.");

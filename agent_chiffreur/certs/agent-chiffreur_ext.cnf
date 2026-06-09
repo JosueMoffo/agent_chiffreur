@@ -1,0 +1,2 @@
+[SAN]
+subjectAltName=DNS:agent-chiffreur,DNS:agent-chiffreur.gandal.svc.cluster.local,IP:10.43.0.4

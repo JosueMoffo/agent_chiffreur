@@ -9,6 +9,8 @@ pub mod error;
 pub mod models;
 pub mod notificateur;
 pub mod sessions_vm;
+pub mod tls_utils;
+pub mod supervision;
 
 // Legacy / simulation (handlers crypto VM — préférer proxy_chiffreur en production)
 pub mod agent_http;
