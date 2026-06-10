@@ -1,13 +1,15 @@
 {
   "local_vm_id": 101,
   "listen_port": 8400,
-  "agent_central_url": "http://127.0.0.1:5004",
+  "grpc_port": 18400,
+  "grpc_listen_host": "0.0.0.0",
+  "agent_central_grpc": "127.0.0.1:5004",
   "agent_token": "ENSPY-TOKEN-2026",
   "chemin_session": "data/proxy_session.101.json",
   "chemin_cle_privee": "data/proxy_vm_secret.101.json",
   "local_deliver_url": "http://127.0.0.1:8101/deliver",
   "old_key_grace_sec": 60,
   "peers": {
-    "102": "http://127.0.0.1:8400"
+    "102": "http://127.0.0.1:8401"
   }
 }

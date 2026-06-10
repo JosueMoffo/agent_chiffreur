@@ -88,10 +88,10 @@ config = {
     "intervalle_supervision_sec": 10,
     "seuil_entropie": 256,
     "chemin_session": "data/session.json",
-    "agent_auditeur_url": None,
+    "agent_auditeur_url": "http://localhost:5005/events",
     "agents_connus": {
         "Decideur": "http://localhost:5003",
-        "auditeur":  "http://localhost:8500"
+        "auditeur":  "http://localhost:5005"
     }
 }
 

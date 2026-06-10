@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+case "${1}" in
+    configure)
+        if ! getent passwd proxy-chiffreur >/dev/null 2>&1; then
+            useradd --system --no-create-home --shell /usr/sbin/nologin proxy-chiffreur || true
+        fi
+        install -d -o proxy-chiffreur -g proxy-chiffreur -m 0750 /var/lib/proxy-chiffreur/data
+        install -d -o proxy-chiffreur -g proxy-chiffreur -m 0750 /etc/proxy-chiffreur
+        if [ ! -f /etc/proxy-chiffreur/proxy_config.json ]; then
+            install -o proxy-chiffreur -g proxy-chiffreur -m 0640 \
+                /usr/share/proxy-chiffreur/proxy_config.example.json \
+                /etc/proxy-chiffreur/proxy_config.json
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload
+            systemctl enable proxy_chiffreur.service || true
+        fi
+        ;;
+esac
+
+exit 0

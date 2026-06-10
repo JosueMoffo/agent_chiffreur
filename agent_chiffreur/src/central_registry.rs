@@ -12,7 +12,12 @@ use tracing::info;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyRecord {
     pub vm_id: u32,
-    pub proxy_url: String,
+    /// URL HTTP du proxy (relais inter-VM, inchangé).
+    #[serde(alias = "proxy_url")]
+    pub proxy_http_url: String,
+    /// Adresse gRPC `host:port` (agent central ↔ proxy).
+    #[serde(default)]
+    pub proxy_grpc_addr: String,
     pub public_key_preview: String,
     pub annonce_a: DateTime<Utc>,
 }
@@ -79,7 +84,8 @@ impl GestionnaireRegistry {
     pub async fn enregistrer_proxy(
         &self,
         vm_id: u32,
-        proxy_url: String,
+        proxy_http_url: String,
+        proxy_grpc_addr: String,
         public_key: &str,
     ) -> Result<(), String> {
         let preview = format!("{}...", &public_key[..16.min(public_key.len())]);
@@ -88,7 +94,8 @@ impl GestionnaireRegistry {
             vm_id.to_string(),
             ProxyRecord {
                 vm_id,
-                proxy_url,
+                proxy_http_url,
+                proxy_grpc_addr,
                 public_key_preview: preview,
                 annonce_a: Utc::now(),
             },
@@ -116,11 +123,22 @@ impl GestionnaireRegistry {
         s.sauvegarder(&self.chemin)
     }
 
-    pub async fn urls_proxies(&self) -> Vec<(u32, String)> {
+    /// Adresses gRPC des proxies (rotation agent → proxy).
+    pub async fn addrs_grpc_proxies(&self) -> Vec<(u32, String)> {
         let s = self.store.read().await;
         s.proxies
             .values()
-            .map(|p| (p.vm_id, p.proxy_url.clone()))
+            .map(|p| (p.vm_id, p.proxy_grpc_addr.clone()))
+            .filter(|(_, a)| !a.is_empty())
+            .collect()
+    }
+
+    /// URLs HTTP des proxies (relais inter-proxy).
+    pub async fn urls_http_proxies(&self) -> Vec<(u32, String)> {
+        let s = self.store.read().await;
+        s.proxies
+            .values()
+            .map(|p| (p.vm_id, p.proxy_http_url.clone()))
             .collect()
     }
 

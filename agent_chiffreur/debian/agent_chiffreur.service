@@ -1,0 +1,25 @@
+[Unit]
+Description=Agent Chiffreur SMA ENSPY (registre central, port 5004)
+Documentation=https://github.com/enspy-sma/agent_chiffreur
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-chiffreur
+Group=agent-chiffreur
+WorkingDirectory=/var/lib/agent-chiffreur
+EnvironmentFile=-/etc/default/agent-chiffreur
+ExecStart=/usr/bin/agent_chiffreur
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-chiffreur /etc/agent-chiffreur
+AmbientCapabilities=
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

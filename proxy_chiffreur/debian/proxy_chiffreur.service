@@ -1,0 +1,24 @@
+[Unit]
+Description=Proxy Chiffreur SMA ENSPY (crypto locale VM, port 8400)
+Documentation=https://github.com/enspy-sma/agent_chiffreur
+After=network-online.target agent_chiffreur.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxy-chiffreur
+Group=proxy-chiffreur
+WorkingDirectory=/var/lib/proxy-chiffreur
+EnvironmentFile=-/etc/default/proxy-chiffreur
+ExecStart=/usr/bin/proxy_chiffreur
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxy-chiffreur /etc/proxy-chiffreur
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

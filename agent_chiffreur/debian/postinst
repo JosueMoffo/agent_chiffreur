@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+case "${1}" in
+    configure)
+        if ! getent passwd agent-chiffreur >/dev/null 2>&1; then
+            useradd --system --no-create-home --shell /usr/sbin/nologin agent-chiffreur || true
+        fi
+        install -d -o agent-chiffreur -g agent-chiffreur -m 0750 /var/lib/agent-chiffreur/data
+        install -d -o agent-chiffreur -g agent-chiffreur -m 0750 /etc/agent-chiffreur
+        if [ ! -f /etc/agent-chiffreur/agent_config.json ]; then
+            install -o agent-chiffreur -g agent-chiffreur -m 0640 \
+                /usr/share/agent-chiffreur/agent_config.example.json \
+                /etc/agent-chiffreur/agent_config.json
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload
+            systemctl enable agent_chiffreur.service || true
+        fi
+        ;;
+esac
+
+exit 0

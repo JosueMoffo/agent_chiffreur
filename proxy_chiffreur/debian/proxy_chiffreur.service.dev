@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxy Chiffreur SMA ENSPY (développement — répertoire source)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+Environment=PROXY_CONFIG=@PROXY_CONFIG@
+Environment=RUST_LOG=info
+ExecStart=@BINARY@
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -78,9 +78,17 @@ pub struct Config {
     #[serde(default)]
     pub agent_auditeur_url: Option<String>,
 
-    /// Agents connus du SMA (map nom → URL).
+    /// Pairs SMA (nom → `host:port` gRPC, ex. `"auditeur": "127.0.0.1:5005"`).
     #[serde(default)]
     pub agents_connus: HashMap<String, String>,
+
+    /// Hôte d'écoute gRPC (défaut: 0.0.0.0).
+    #[serde(default = "default_grpc_host")]
+    pub grpc_listen_host: String,
+}
+
+fn default_grpc_host() -> String {
+    "0.0.0.0".to_string()
 }
 
 // ── Valeurs par défaut ────────────────────────────────────────────────────────
@@ -106,9 +114,16 @@ impl Config {
     ///   1. Variables d'environnement du processus
     ///   2. Fichier `config/agent_config.json`
     ///   3. Valeurs par défaut codées dans le type `Config`
+    /// Chemin effectif du fichier JSON (`AGENT_CONFIG` ou défaut relatif).
+    pub fn chemin_config_effectif() -> String {
+        std::env::var("AGENT_CONFIG").unwrap_or_else(|_| CHEMIN_CONFIG.to_string())
+    }
+
     pub fn charger(chemin: Option<&str>) -> Self {
-        let chemin = chemin.unwrap_or(CHEMIN_CONFIG);
-        let mut cfg = Self::depuis_fichier(chemin);
+        let chemin = chemin
+            .map(|s| s.to_owned())
+            .unwrap_or_else(Self::chemin_config_effectif);
+        let mut cfg = Self::depuis_fichier(&chemin);
         cfg.appliquer_surcharges_env();
         cfg
     }
@@ -195,6 +210,7 @@ impl Default for Config {
             chemin_session: default_chemin_session(),
             agent_auditeur_url: None,
             agents_connus: HashMap::new(),
+            grpc_listen_host: default_grpc_host(),
         }
     }
 }
@@ -207,4 +223,49 @@ impl Config {
     pub fn http_port(&self) -> u16 { self.agent_port }
     pub fn intervalle_supervision(&self) -> u64 { self.intervalle_supervision_sec }
     pub fn intervalle_rotation_sec(&self) -> u64 { self.intervalle_rotation_sec }
+
+    /// Adresse gRPC du Décideur (port 5003).
+    pub fn adresse_grpc_decideur(&self) -> Option<String> {
+        self.agents_connus
+            .get(&self.agent_rotation_autorise)
+            .cloned()
+            .or_else(|| self.agents_connus.get("Decideur").cloned())
+    }
+
+    /// Hôte:port gRPC de l'auditeur (port 5005).
+    pub fn adresse_grpc_auditeur(&self) -> Option<(String, u16)> {
+        let raw = if let Some(ref url) = self.agent_auditeur_url {
+            if !url.is_empty() {
+                url.clone()
+            } else {
+                self.agents_connus.get("auditeur")?.clone()
+            }
+        } else {
+            self.agents_connus.get("auditeur")?.clone()
+        };
+        parse_host_port(&raw, 5005)
+    }
+
+    pub fn grpc_socket_addr(&self) -> std::net::SocketAddr {
+        format!("{}:{}", self.grpc_listen_host, self.agent_port)
+            .parse()
+            .unwrap_or_else(|_| std::net::SocketAddr::from(([0, 0, 0, 0], self.agent_port)))
+    }
+}
+
+fn parse_host_port(raw: &str, default_port: u16) -> Option<(String, u16)> {
+    let s = raw
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    if let Some((h, p)) = s.rsplit_once(':') {
+        if let Ok(port) = p.parse::<u16>() {
+            return Some((h.to_string(), port));
+        }
+    }
+    if s.is_empty() {
+        None
+    } else {
+        Some((s.to_string(), default_port))
+    }
 }

@@ -27,10 +27,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm::aead::OsRng;
-use agent_chiffreur::app::{build_router as build_router_central, preparer_agent};
+use agent_chiffreur::app::{executer_serveur_grpc, preparer_agent};
 use agent_chiffreur::config::Config;
+use gandal_common::tls::{client_tls_config, domain_from_cn, GandalPkiPaths, CN_CHIFFREUR};
+use gandal_common::{ChiffreurServiceClient, RotateResponse};
+use tonic::Code;
 use proxy_chiffreur::app::{build_router as build_router_proxy, preparer_proxy};
 use proxy_chiffreur::config::ProxyConfig;
+use proxy_chiffreur::proxy_grpc::demarrer_serveur_grpc_proxy;
+use tonic::transport::Channel;
 use agent_chiffreur::sessions_vm::GestionnaireSessionsVm;
 use agent_chiffreur::sim_export::{
     apercu_hex, chiffrer_dechiffrer_avec_cle_vm, exporter_sim_blobs, JournalSimulation,
@@ -135,20 +140,94 @@ impl ClientHttp {
         (status, rep)
     }
 
-    async fn post_rotate(&self, agent_name: &str, body: Value) -> (StatusCode, Value) {
-        let res = self
+    async fn post_rotate_token(&self, token: Option<&str>, body: Value) -> (StatusCode, Value) {
+        let mut req = self
             .http
             .post(format!("{}/credential/rotate", self.base))
-            .header("X-Agent-Name", agent_name)
-            .json(&body)
-            .send()
-            .await
-            .expect("requête rotate");
+            .json(&body);
+        if let Some(t) = token {
+            req = req.header("X-Agent-Token", t);
+        }
+        let res = req.send().await.expect("requête rotate");
         let status = res.status();
         let rep: Value = res.json().await.unwrap_or(json!({}));
         (status, rep)
     }
 
+    async fn post_rotate_legacy_name(&self, _agent_name: &str, _body: Value) -> (StatusCode, Value) {
+        (StatusCode::NOT_IMPLEMENTED, json!({"error": "HTTP rotate désactivé — utiliser gRPC"}))
+    }
+}
+
+struct ClientGrpcCentral {
+    endpoint: String,
+    ca: std::path::PathBuf,
+}
+
+impl ClientGrpcCentral {
+    fn new(port: u16) -> Self {
+        Self {
+            endpoint: format!("https://127.0.0.1:{port}"),
+            ca: std::path::PathBuf::from("../ca/ca.crt"),
+        }
+    }
+
+    fn pki_role(&self, role: &str) -> GandalPkiPaths {
+        let (cert, key) = match role {
+            "decideur" => ("../certs/decideur.crt", "../certs/decideur.key"),
+            "proxy" => ("../certs/proxy.crt", "../certs/proxy.key"),
+            _ => ("../certs/chiffreur.crt", "../certs/chiffreur.key"),
+        };
+        GandalPkiPaths {
+            ca: self.ca.clone(),
+            cert: cert.into(),
+            key: key.into(),
+        }
+    }
+
+    async fn channel_role(&self, role: &str) -> Result<Channel, String> {
+        let pki = self.pki_role(role);
+        let tls = client_tls_config(&pki, domain_from_cn(CN_CHIFFREUR))
+            .map_err(|e| e.to_string())?;
+        Channel::from_shared(self.endpoint.clone())
+            .map_err(|e| e.to_string())?
+            .tls_config(tls)
+            .map_err(|e| e.to_string())?
+            .connect()
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn attendre_health(&self, max_sec: u64) -> bool {
+        for _ in 0..max_sec * 10 {
+            if let Ok(ch) = self.channel_role("decideur").await {
+                let mut client = ChiffreurServiceClient::new(ch);
+                if client.health(gandal_common::Empty {}).await.is_ok() {
+                    return true;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    async fn rotate_role(&self, role: &str) -> Result<RotateResponse, tonic::Status> {
+        let mut client = ChiffreurServiceClient::new(
+            self.channel_role(role)
+                .await
+                .map_err(|e| tonic::Status::unavailable(e))?,
+        );
+        let rep = client
+            .rotate_credentials(gandal_common::RotateRequest {
+                request_id: String::new(),
+                initiateur: format!("simulation-{role}"),
+            })
+            .await?;
+        Ok(rep.into_inner())
+    }
+}
+
+impl ClientHttp {
     async fn attendre_health(&self, max_sec: u64) -> bool {
         for _ in 0..max_sec * 10 {
             let (st, _) = self.get_public("/health").await;
@@ -337,10 +416,13 @@ async fn main() {
     config_central.agent_rotation_autorise = agent_ok.to_string();
     config_central.chemin_registry = "data/sim_central_registry.json".to_string();
 
+    let grpc_port_proxy = port_proxy + 1000;
     let mut proxy_cfg = ProxyConfig {
         local_vm_id: 101,
         listen_port: port_proxy,
-        agent_central_url: format!("http://127.0.0.1:{port_central}"),
+        grpc_port: grpc_port_proxy,
+        grpc_listen_host: "0.0.0.0".to_string(),
+        agent_central_grpc: format!("127.0.0.1:{port_central}"),
         agent_token: token.to_string(),
         chemin_session: chemin_session.to_string(),
         chemin_cle_privee: "data/sim_proxy_secret.json".to_string(),
@@ -354,44 +436,54 @@ async fn main() {
 
     let mut journal = JournalSimulation::default();
 
-    let (state_central, _) = preparer_agent(config_central).await;
-    let app_central = build_router_central(Arc::clone(&state_central));
-    let addr_central = format!("0.0.0.0:{port_central}");
-    let listener_c = tokio::net::TcpListener::bind(&addr_central)
-        .await
-        .expect("bind agent central");
-    let handle_central = tokio::spawn(async move {
-        axum::serve(listener_c, app_central)
-            .await
-            .expect("serveur central");
-    });
+    std::env::set_var("GANDAL_CA", "../ca/ca.crt");
+    std::env::set_var("GANDAL_CERT", "../certs/chiffreur.crt");
+    std::env::set_var("GANDAL_KEY", "../certs/chiffreur.key");
 
+    let state_central = preparer_agent(config_central).await;
+    let handle_central = {
+        let st = Arc::clone(&state_central);
+        tokio::spawn(async move {
+            let _ = executer_serveur_grpc(st).await;
+        })
+    };
+
+    std::env::set_var("GANDAL_CERT", "../certs/proxy.crt");
+    std::env::set_var("GANDAL_KEY", "../certs/proxy.key");
     let (state_proxy, _) = preparer_proxy(proxy_cfg.clone(), true).await;
+    let grpc_proxy_addr = proxy_cfg.grpc_socket_addr();
+    let handle_grpc_proxy = {
+        let st = Arc::clone(&state_proxy);
+        tokio::spawn(async move {
+            let _ = demarrer_serveur_grpc_proxy(st, grpc_proxy_addr).await;
+        })
+    };
+
     let app_proxy = build_router_proxy(Arc::clone(&state_proxy));
     let addr_proxy = format!("0.0.0.0:{}", proxy_cfg.listen_port);
     let listener_p = tokio::net::TcpListener::bind(&addr_proxy)
         .await
-        .expect("bind proxy");
+        .expect("bind proxy HTTP");
     let handle_proxy = tokio::spawn(async move {
         axum::serve(listener_p, app_proxy)
             .await
-            .expect("serveur proxy");
+            .expect("serveur proxy HTTP");
     });
 
-    let base_central = format!("http://127.0.0.1:{port_central}");
     let base_proxy = format!("http://127.0.0.1:{port_proxy}");
     let client = ClientHttp::new(&base_proxy, token);
-    let client_central = ClientHttp::new(&base_central, token);
+    let client_grpc_central = ClientGrpcCentral::new(port_central);
 
-    etape("URL agent central", &base_central);
+    etape("gRPC agent central", &format!("127.0.0.1:{port_central}"));
     etape("URL proxy VM", &base_proxy);
     etape("sessions VM", chemin_session);
     etape("export final", chemin_sim_blobs);
 
-    if !client_central.attendre_health(5).await {
+    if !client_grpc_central.attendre_health(5).await {
         handle_central.abort();
+        handle_grpc_proxy.abort();
         handle_proxy.abort();
-        panic!("Agent central /health timeout.");
+        panic!("Agent central gRPC /health timeout.");
     }
     if !client.attendre_health(5).await {
         handle_central.abort();
@@ -400,18 +492,21 @@ async fn main() {
     }
     ok("Agent central + proxy prêts");
 
+    let proxy_grpc_advertise = proxy_cfg.grpc_advertise_addr();
     if let Err(e) = state_proxy
         .central
         .annoncer_proxy(
             proxy_cfg.local_vm_id,
             &base_proxy,
+            &proxy_grpc_advertise,
             &state_proxy.secret.public_key_hex,
         )
         .await
     {
         handle_central.abort();
+        handle_grpc_proxy.abort();
         handle_proxy.abort();
-        panic!("Annonce proxy au central : {e}");
+        panic!("Annonce proxy gRPC au central : {e}");
     }
     ok("Proxy annoncé dans le registre central");
 
@@ -709,25 +804,30 @@ async fn main() {
         "Falsification détectée — CRYPTO_ERROR"
     );
 
-    // ═══ I — Contrôle accès rotation (refus d'abord, succès ensuite) ══════════
-    sep("SCÉNARIO I — POST /credential/rotate (X-Agent-Name)");
+    // ═══ I — Contrôle accès rotation gRPC mTLS (CN Décideur) ═══════════════════
+    sep("SCÉNARIO I — gRPC RotateCredentials (mTLS CN=decideur)");
     for sc in meta["scenarios_acces_rotation"].as_array().unwrap_or(&vec![]) {
-        let attendu = sc["attendu_http"].as_u64().unwrap_or(403);
-        if attendu == 200 {
+        let id = sc["id"].as_str().unwrap_or("?");
+        if id == "I-ok" {
             continue;
         }
-        let id = sc["id"].as_str().unwrap_or("?");
-        let name = sc["agent_name"].as_str().unwrap_or("");
-        workflow_step(1, &format!("{id} : X-Agent-Name = '{name}' → HTTP {attendu}"));
-        let (st_i, rep_i) = client_central.post_rotate(name, json!({})).await;
-        assert_ok!(
-            st_i.as_u16() == attendu as u16 && rep_i["error"] == sc["error_code"],
-            &format!("I/{id} — accès refusé ({})", sc["error_code"])
-        );
+        let role = sc["cert_role"].as_str().unwrap_or("proxy");
+        let doit_reussir = sc["attendu_ok"].as_bool().unwrap_or(false);
+        workflow_step(1, &format!("{id} : cert CN={role} → rotation {}", if doit_reussir { "OK" } else { "refusée" }));
+        let res = client_grpc_central.rotate_role(role).await;
+        if doit_reussir {
+            assert_ok!(res.is_ok(), &format!("I/{id} — rotation autorisée (CN={role})"));
+        } else {
+            let refuse = matches!(
+                res,
+                Err(s) if s.code() == Code::PermissionDenied || s.code() == Code::Unauthenticated
+            );
+            assert_ok!(refuse, &format!("I/{id} — CN={role} refusé (mTLS)"));
+        }
     }
-    workflow_step(3, "I-ok : agent autorisé → HTTP 200");
-    let (st_i_ok, _) = client_central.post_rotate(agent_ok, json!({})).await;
-    assert_ok!(st_i_ok == StatusCode::OK, "I/I-ok — rotation autorisée");
+    workflow_step(2, "I-ok : cert Décideur → RotateCredentials OK");
+    let rep_i_ok = client_grpc_central.rotate_role("decideur").await;
+    assert_ok!(rep_i_ok.is_ok(), "I/I-ok — rotation Décideur autorisée");
 
     // ═══ J — Rotation ECDH ════════════════════════════════════════════════════
     sep("SCÉNARIO J — POST /credential/rotate (mise à jour session.json)");
@@ -755,13 +855,16 @@ async fn main() {
         "J — chiffrement référence avant rotation"
     );
 
-    workflow_step(1, "POST /credential/rotate central → proxy (cycle old/new)");
-    let (st_j, rep_j) = client_central.post_rotate(agent_ok, json!({})).await;
-    etape("proxies_reussis", &rep_j["proxies_reussis"].to_string());
+    workflow_step(1, "gRPC RotateCredentials central → proxy (cycle old/new)");
+    let rep_j = client_grpc_central
+        .rotate_role("decideur")
+        .await
+        .expect("rotation gRPC");
+    etape("proxies_reussis", &rep_j.proxies_reussis.to_string());
 
     assert_ok!(
-        st_j == StatusCode::OK && rep_j["proxies_reussis"].as_u64().unwrap_or(0) >= 1,
-        "J — rotation propagée au proxy via agent central"
+        rep_j.proxies_reussis >= 1,
+        "J — rotation propagée au proxy via agent central (gRPC)"
     );
 
     for vm_def in &vms_def {
@@ -847,7 +950,7 @@ async fn main() {
     );
 
     // ═══ L — Double rotation ══════════════════════════════════════════════════
-    sep("SCÉNARIO L — Deux rotations HTTP (VMs 201–202)");
+    sep("SCÉNARIO L — Deux rotations gRPC (VMs 201–202)");
     for vm_id in [201u32, 202] {
         let (_, pub_hex) = generer_paire_vm();
         client
@@ -858,11 +961,11 @@ async fn main() {
             .await;
     }
 
-    workflow_step(1, "Première POST /credential/rotate (central)");
-    client_central.post_rotate(agent_ok, json!({})).await;
+    workflow_step(1, "Première gRPC RotateCredentials (central)");
+    let _ = client_grpc_central.rotate_role("decideur").await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    workflow_step(2, "Deuxième POST /credential/rotate (central)");
-    client_central.post_rotate(agent_ok, json!({})).await;
+    workflow_step(2, "Deuxième gRPC RotateCredentials (central)");
+    let _ = client_grpc_central.rotate_role("decideur").await;
 
     for vm_id in [201u32, 202] {
         let s = session_vm(chemin_session, vm_id).unwrap();
@@ -872,6 +975,7 @@ async fn main() {
 
     // ═══ Export persistant ════════════════════════════════════════════════════
     handle_central.abort();
+    handle_grpc_proxy.abort();
     handle_proxy.abort();
 
     sep("EXPORT — Persistance data/sim_blobs.json");

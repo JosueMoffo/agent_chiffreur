@@ -8,3 +8,4 @@ data/*.json
 .cursor
 **/*.rs.bk
 Cargo.lock
+/ca/

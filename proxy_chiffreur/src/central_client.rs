@@ -1,86 +1,90 @@
-//! Client HTTP vers l'agent chiffreur **central** (port 5004).
+//! Client gRPC vers l'agent chiffreur central (mTLS GANDAL).
 
-use reqwest::Client;
-use serde_json::{json, Value};
+use gandal_common::tls::{client_tls_config, domain_from_cn, GandalPkiPaths, CN_CHIFFREUR};
+use gandal_common::{
+    ChiffreurServiceClient, ProxyAnnounceRequest, VmSyncRequest,
+};
+use tonic::transport::Channel;
 use tracing::debug;
 
 use crate::config::ProxyConfig;
 
 #[derive(Clone)]
 pub struct ClientCentral {
-    http: Client,
-    base: String,
-    token: String,
+    endpoint: String,
 }
 
 impl ClientCentral {
     pub fn new(config: &ProxyConfig) -> Self {
         Self {
-            http: Client::new(),
-            base: config.agent_central_url.trim_end_matches('/').to_string(),
-            token: config.agent_token.clone(),
+            endpoint: config.agent_central_grpc.clone(),
         }
     }
 
-    async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
-        let url = format!("{}{}", self.base, path);
-        let res = self
-            .http
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("X-Agent-Token", &self.token)
-            .json(&body)
-            .send()
+    fn endpoint_uri(&self) -> String {
+        let ep = self.endpoint.trim();
+        if ep.starts_with("https://") {
+            ep.to_string()
+        } else {
+            format!(
+                "https://{}",
+                ep.trim_start_matches("http://")
+            )
+        }
+    }
+
+    async fn channel(&self) -> Result<Channel, String> {
+        let pki = GandalPkiPaths::for_proxy();
+        let uri = self.endpoint_uri();
+        let tls = client_tls_config(&pki, domain_from_cn(CN_CHIFFREUR))
+            .map_err(|e| e.to_string())?;
+        Channel::from_shared(uri)
+            .map_err(|e| e.to_string())?
+            .tls_config(tls)
+            .map_err(|e| e.to_string())?
+            .connect()
             .await
-            .map_err(|e| format!("agent central {path} : {e}"))?;
-        let status = res.status();
-        let rep: Value = res.json().await.map_err(|e| format!("JSON : {e}"))?;
-        if !status.is_success() {
-            return Err(format!(
-                "HTTP {} : {}",
-                status.as_u16(),
-                rep["description"].as_str().unwrap_or("erreur")
-            ));
-        }
-        Ok(rep)
+            .map_err(|e| format!("agent central gRPC : {e}"))
     }
 
-    /// Annonce ce proxy auprès de l'agent central au démarrage.
+    /// Annonce ce proxy auprès de l'agent central (gRPC mTLS).
     pub async fn annoncer_proxy(
         &self,
         vm_id: u32,
-        proxy_url: &str,
+        proxy_http_url: &str,
+        proxy_grpc_addr: &str,
         public_key_hex: &str,
     ) -> Result<(), String> {
-        self.post(
-            "/registry/proxy/announce",
-            json!({
-                "vm_id": vm_id,
-                "proxy_url": proxy_url,
-                "public_key": public_key_hex,
-            }),
-        )
-        .await?;
-        debug!("[Central] proxy vm_id={vm_id} annoncé");
+        let mut client = ChiffreurServiceClient::new(self.channel().await?);
+        client
+            .announce_proxy(ProxyAnnounceRequest {
+                vm_id,
+                proxy_http_url: proxy_http_url.to_string(),
+                proxy_grpc_addr: proxy_grpc_addr.to_string(),
+                public_key_hex: public_key_hex.to_string(),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        debug!("[gRPC] proxy vm_id={vm_id} annoncé au central");
         Ok(())
     }
 
-    /// Synchronise l'enregistrement d'une VM (pair) vers le registre central.
+    /// Synchronise une VM vers le registre central.
     pub async fn sync_vm_session(
         &self,
         vm_id: u32,
         public_key_hex: &str,
         heberge_par_proxy_vm_id: u32,
     ) -> Result<(), String> {
-        self.post(
-            "/registry/vm/sync",
-            json!({
-                "vm_id": vm_id,
-                "public_key": public_key_hex,
-                "heberge_par_proxy_vm_id": heberge_par_proxy_vm_id,
-            }),
-        )
-        .await?;
+        let mut client = ChiffreurServiceClient::new(self.channel().await?);
+        client
+            .sync_vm(VmSyncRequest {
+                vm_id,
+                public_key_hex: public_key_hex.to_string(),
+                heberge_par_proxy_vm_id,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }

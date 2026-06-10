@@ -1,7 +1,10 @@
-//! Point d'entrée — Agent Chiffreur ENSPY
+//! Point d'entrée — Agent Chiffreur ENSPY (gRPC mTLS GANDAL, port 5004)
 
-use agent_chiffreur::app::{build_router, preparer_agent};
+use std::sync::Arc;
+
+use agent_chiffreur::app::{executer_serveur_grpc, preparer_agent};
 use agent_chiffreur::config::Config;
+use gandal_common::tls::{warn_if_missing, GandalPkiPaths};
 use tokio::signal;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -17,30 +20,29 @@ async fn main() {
         .with_target(true)
         .init();
 
-    info!("=== AgentChiffreur v{} — démarrage ===", VERSION);
+    info!("=== AgentChiffreur v{} — gRPC mTLS GANDAL ===", VERSION);
+
+    warn_if_missing(&GandalPkiPaths::for_chiffreur());
 
     let config = Config::charger(None);
     info!(
-        "[Config] port central={} decideur='{}' registry='{}'",
-        config.agent_port,
-        config.agent_rotation_autorise,
-        config.chemin_registry,
+        "[Config] port gRPC={} registry='{}'",
+        config.agent_port, config.chemin_registry,
     );
 
-    let (state, port) = preparer_agent(config).await;
-    let app = build_router(state);
+    let state = preparer_agent(config).await;
+    let state_grpc = Arc::clone(&state);
 
-    let addr = format!("0.0.0.0:{port}");
-    info!("Serveur HTTP sur http://{addr}");
-
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("Impossible de lier le port HTTP");
-
-    axum::serve(listener, app)
-        .with_graceful_shutdown(signal_arret())
-        .await
-        .expect("Erreur serveur HTTP");
+    tokio::select! {
+        res = executer_serveur_grpc(state_grpc) => {
+            if let Err(e) = res {
+                tracing::error!("Serveur gRPC arrêté : {e}");
+            }
+        }
+        _ = signal_arret() => {
+            info!("Arrêt demandé.");
+        }
+    }
 
     info!("Agent Chiffreur arrêté proprement.");
 }

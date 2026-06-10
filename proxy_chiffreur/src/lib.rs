@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod central_client;
+pub mod proxy_grpc;
 pub mod config;
 pub mod crypto_moteur;
 pub mod error;

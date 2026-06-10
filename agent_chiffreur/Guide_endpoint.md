@@ -1,12 +1,18 @@
 # Guide des endpoints — Agent Chiffreur ENSPY
 
-Récapitulatif HTTP — **agent central** port **5004**, **proxy VM** port **8400** (exemples curl ci-dessous ; crypto VM → proxy).
+Récapitulatif — **agent central** en **gRPC mTLS** port **5004** ; **proxy VM** en **HTTP** port **8400** (crypto VM + relais inter-proxy).
 
-**Agent central :** `http://localhost:5004` — **Proxy VM :** `http://localhost:8400`
+**Agent central (SMA) :** `ChiffreurService` sur `127.0.0.1:5004` (TLS, CN `chiffreur`) — voir `CONTRAT_SMA.md` et `documentGandal.txt`.
 
-**Token :** en-tête `X-Agent-Token` optionnel (toute valeur acceptée). Exemple ci-dessous : `ENSPY-TOKEN-2026` (valeur par défaut du code ; si vous utilisez `config/agent_config.json`, remplacez par la valeur du champ `agent_token`).
+**Proxy VM :** `http://localhost:8400` — endpoints HTTP ci-dessous.
 
-**Rotation :** `POST /credential/rotate` exige l’en-tête `X-Agent-Name: Decideur` (ou la valeur de `agent_rotation_autorise` dans la config).
+**Ports SMA :** Chiffreur **5004** (gRPC), Décideur **5003**, Auditeur **5005** (gRPC) — Proxy **8400** HTTP + **18400** gRPC (agent↔proxy).
+
+**Communication SMA :** Décideur → `RotateCredentials` ; Chiffreur → Auditeur `PublishEvent` ; Proxy → `AnnounceProxy` / `SyncVm`. **Pas de HTTP entre agents.**
+
+**Proxy HTTP :** en-tête `X-Agent-Token` sur les routes protégées (`agent_token` dans la config proxy).
+
+**Rotation centrale :** `ChiffreurService.RotateCredentials` avec certificat client **CN=decideur** (plus de `POST /credential/rotate` HTTP sur l’agent).
 
 ---
 
@@ -16,7 +22,7 @@ Récapitulatif HTTP — **agent central** port **5004**, **proxy VM** port **840
 ./install.sh
 ```
 
-Initialise la configuration (`scripts/init_config.sh`), compile l’agent central et démarre sur `http://localhost:5004`. Sur chaque VM : `cd ../proxy_chiffreur && ./install.sh`.
+Génère les certificats (`bash ../scripts/gen_gandal_certs.sh`), initialise la config, compile et démarre l’agent central en **gRPC mTLS** sur le port **5004**. Sur chaque VM : `cd ../proxy_chiffreur && ./install.sh`.
 
 Options : `./install.sh --help`
 
@@ -162,16 +168,16 @@ Réponse : `plaintext`, `key_used` (`"new"` ou `"old"`), `vm_id`.
 
 Pour **chaque** VM enregistrée : nouvelle paire éphémère agent, nouveau ECDH, `old_key` ← ancienne `new_key`, notification HTTP optionnelle vers `url_notification`.
 
-**Autorisation :** en-tête `X-Agent-Name` doit correspondre à `agent_rotation_autorise` (défaut : `Decideur`).
+**Autorisation :** `X-Agent-Token` (token partagé SMA / Décideur). Après rotation, l’agent central notifie l’auditeur (`POST http://localhost:5005/events`, format `source_agent` + `event_type: CREDENTIAL_ROTATION`).
 
 ```bash
 curl -s -X POST http://localhost:5004/credential/rotate \
   -H "Content-Type: application/json" \
-  -H "X-Agent-Name: Decideur" \
+  -H "X-Agent-Token: <agent_token>" \
   -d '{"request_id": "rotation-manuelle-001"}'
 ```
 
-Réponse : `rotation_id`, `vms_total`, `vms_reussies`, `vms_echecs`, `resultats[]` (par VM).
+Réponse agent central : `type_rotation`, `proxies_total`, `proxies_reussis`, `resultats[]` (par proxy VM).
 
 Exemple de corps envoyé à la VM (notification) : `agent_ephemeral_public_key_hex`, `new_key_hex`, `event: KEY_ROTATION`.
 
@@ -260,10 +266,10 @@ curl -s -X POST http://localhost:8400/decrypt \
     "auth_tag": "AUTH_TAG"
   }'
 
-# 5. Rotation (agent autorisé)
+# 5. Rotation (token Décideur)
 curl -s -X POST http://localhost:5004/credential/rotate \
   -H "Content-Type: application/json" \
-  -H "X-Agent-Name: Decideur" \
+  -H "X-Agent-Token: ENSPY-TOKEN-2026" \
   -d '{}'
 
 # 6. Lister les sessions
@@ -291,7 +297,8 @@ curl -s http://localhost:8400/vm/sessions \
 |-----------|---------|----------|
 | 400 | `INVALID_REQUEST` | Champ manquant ou invalide |
 | 400 | `CRYPTO_ERROR` | Échec GCM (intégrité) au déchiffrement |
-| 403 | `FORBIDDEN` | `X-Agent-Name` incorrect sur `/credential/rotate` |
+| 401 | `TOKEN_MISSING` | `X-Agent-Token` absent |
+| 403 | `TOKEN_INVALID` / `FORBIDDEN` | Token ou rotation non autorisée |
 | 404 | `VM_NOT_FOUND` | `vm_id` absent de `session.json` |
 | 404 | `NOT_FOUND` | Session à supprimer introuvable |
 | 500 | `CRYPTO_ERROR` / `STORE_ERROR` | Erreur interne crypto ou écriture disque |

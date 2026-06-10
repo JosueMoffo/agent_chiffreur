@@ -1,0 +1,17 @@
+[package]
+name = "gandal_common"
+version = "0.1.0"
+edition = "2021"
+description = "Protobuf et mTLS GANDAL partagés (agents SMA ENSPY)"
+license = "MIT"
+
+[dependencies]
+tonic = { version = "0.12", features = ["tls", "transport"] }
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+thiserror = "1"
+x509-parser = "0.16"
+
+[build-dependencies]
+tonic-build = "0.12"
