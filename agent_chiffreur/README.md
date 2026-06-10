@@ -71,7 +71,7 @@ Toute tentative de connexion sans certificat valide, ou avec un certificat dont 
 ```json
 {
   "agent_port": 5004,
-  "agent_rotation_autorise": "agent-decideur",
+  "agent_rotation_autorise": "decideur",
   "intervalle_rotation_sec": 300,
   "chemin_registry": "data/central_registry.json"
 }

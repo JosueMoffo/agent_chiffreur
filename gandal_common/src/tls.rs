@@ -26,7 +26,7 @@ impl GandalPkiPaths {
     pub fn resolve(defaut_cert: &str, defaut_key: &str) -> Self {
         let ca = std::env::var("GANDAL_CA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("ca/ca.crt"));
+            .unwrap_or_else(|_| PathBuf::from("certs/ca.crt"));
         let cert = std::env::var("GANDAL_CERT")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(defaut_cert));

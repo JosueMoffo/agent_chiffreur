@@ -97,7 +97,7 @@ fn default_chemin_registry() -> String { "data/central_registry.json".to_string(
 fn default_token()          -> String { "ENSPY-TOKEN-2026".to_string() }
 fn default_rotation_sec()   -> u64    { 300 }
 fn default_grace_sec()      -> u64    { 60 }
-fn default_agent_rotation() -> String { "Decideur".to_string() }
+fn default_agent_rotation() -> String { "decideur".to_string() }
 fn default_supervision_sec()-> u64    { 10 }
 fn default_seuil_entropie() -> u32    { 256 }
 fn default_chemin_session() -> String {
@@ -229,7 +229,7 @@ impl Config {
         self.agents_connus
             .get(&self.agent_rotation_autorise)
             .cloned()
-            .or_else(|| self.agents_connus.get("Decideur").cloned())
+            .or_else(|| self.agents_connus.get("decideur").cloned())
     }
 
     /// Hôte:port gRPC de l'auditeur (port 5005).

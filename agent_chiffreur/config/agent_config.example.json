@@ -6,14 +6,14 @@
   "agent_token": "REMPLACER_PAR_TOKEN_ALEATOIRE_64_HEX",
   "intervalle_rotation_sec": 300,
   "old_key_grace_sec": 60,
-  "agent_rotation_autorise": "Decideur",
+  "agent_rotation_autorise": "decideur",
   "intervalle_supervision_sec": 10,
   "seuil_entropie": 256,
   "chemin_session": "data/session.json",
   "agent_auditeur_url": "127.0.0.1:5005",
   "grpc_listen_host": "0.0.0.0",
   "agents_connus": {
-    "Decideur": "127.0.0.1:5003",
+    "decideur": "127.0.0.1:5003",
     "auditeur": "127.0.0.1:5005"
   }
 }
