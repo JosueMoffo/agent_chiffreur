@@ -1,92 +1,60 @@
-Il y a deux chemins distincts pour obtenir une clé AES dans votre agent. Le flux « VM / client » est celui que la simulation met en avant.
+# Guide des Secrets et Flux Cryptographiques
 
-## 1. Deux familles de clés AES dans le projet
+L'architecture cryptographique repose sur une séparation stricte des rôles : l'**Agent Central** (gRPC port 5004) n'a jamais accès aux clés de chiffrement de données. C'est le **Proxy local** (HTTP port 8400) déployé sur chaque VM qui gère la logique d'établissement de clés et de chiffrement.
 
-| Usage | Comment la clé est créée | Où elle vit |
-|-------|--------------------------|-------------|
-| `POST /encrypt` + `vm_id` | Chiffrement avec la **`new_key`** de la VM | `session.json` |
-| `POST /decrypt` + `vm_id` | Déchiffrement avec **`new_key`**, puis **`old_key`** si timer de grâce actif | `session.json` |
-| Trousseau interne (legacy) | 32 octets aléatoires au démarrage | RAM + `blobs_store.json` (hors `/encrypt` HTTP) |
-| `POST /vm/session/register` (par VM) | ECDH X25519 avec **nouvelle paire éphémère agent** à chaque register/rotate | `session.json` → `agent_public_key`, `new_key` / `old_key` |
+## 1. Familles de clés AES
 
-Ce qui suit décrit surtout le flux VM, puis le trousseau.
+| Usage | Gestionnaire | Rôle et Stockage |
+|-------|--------------|-------------|
+| `POST /encrypt` + `vm_id` | **Proxy VM** | Chiffrement avec la **`new_key`** de la VM (stockée dans le `session.json` local du proxy). |
+| `POST /decrypt` + `vm_id` | **Proxy VM** | Déchiffrement avec **`new_key`**, puis **`old_key`** si timer de grâce actif. |
+| `POST /vm/session/register` | **Proxy VM** | Échange ECDH X25519 avec une **nouvelle paire éphémère proxy** pour dériver une clé AES (`new_key`). |
+| Transport Inter-Agents | **mTLS (Tonic)**| Sécurisation asymétrique X.509 gérée au niveau transport (gRPC) pour l'Agent Central et l'interface gRPC du Proxy (port 18400). Les secrets d'application AES-GCM (ci-dessus) transitent à l'intérieur de ce tunnel sécurisé si nécessaire (ex. relais inter-VM). |
 
-## 2. Création de la clé AES pour une VM (flux principal)
+## 2. Établissement de la Clé AES (Flux Proxy-VM)
 
-### Étape par étape
+Le proxy local et l'application VM négocient une clé secrète via l'algorithme d'échange de clés Diffie-Hellman sur courbes elliptiques (ECDH), spécifiquement `X25519`.
 
-1. VM : génère paire X25519 (`priv_VM`, `pub_VM`)
-2. `POST /vm/session/register` avec `public_key` (64 hex)
-3. **Agent** : génère une **nouvelle paire X25519 éphémère** → `agent_ephemeral_public_key_hex`
-4. ECDH(`priv_éphémère_agent`, `pub_VM`) → secret 32 octets → `new_key` (hex)
-5. Persistance : `session.json` (`public_key`, `agent_public_key`, `new_key`)
-6. VM : ECDH(`priv_VM`, `agent_ephemeral_public_key_hex`) → **même** secret 32 octets
-7. Utilisation de ce secret comme clé AES-256-GCM
+### Étape par étape :
 
-La clé privée éphémère de l’agent **n’est pas stockée** ; seule sa clé publique (`agent_public_key` dans `session.json`) permet à la VM de recalculer le secret.
+1. L'application VM génère une paire de clés X25519 (`priv_VM`, `pub_VM`).
+2. L'application appelle HTTP `POST http://localhost:8400/vm/session/register` sur son proxy local, en fournissant `pub_VM`.
+3. Le proxy génère une **nouvelle paire X25519 éphémère** (`priv_éphémère_proxy`, `pub_éphémère_proxy`).
+4. Le proxy effectue `ECDH(priv_éphémère_proxy, pub_VM)` pour dériver un secret partagé de 32 octets. Ce secret devient la clé AES `new_key`.
+5. Le proxy persiste ces informations dans `session.json`.
+6. Le proxy annonce sa nouvelle VM à l'Agent Central via **l'appel gRPC sécurisé `SyncVm`** (port 5004).
+7. L'Agent central est synchronisé pour tenir son registre, mais **il ne reçoit jamais la `new_key` ni le secret**.
 
-### Côté agent (`handle_vm_register`, `rotation_vm`)
+> **Important :** La clé privée éphémère du proxy **n'est pas stockée**. Elle est supprimée de la mémoire (via `zeroize`) juste après le calcul du secret partagé.
 
-À chaque enregistrement ou rotation, l’agent appelle `ecdh_session_ephemere(&vm_pub_bytes)` :
+## 3. Utilisation de la clé : Chiffrement / Déchiffrement
 
-- `StaticSecret::random_from_rng` → paire éphémère
-- ECDH avec la clé publique VM enregistrée
-- `new_key` = hex(secret 32 octets)
-- Réponse HTTP : `agent_ephemeral_public_key_hex`
+Le chiffrement des messages est assuré par l'algorithme de chiffrement authentifié **AES-256-GCM**.
 
-`POST /ecdh/initiate` suit le même mécanisme (une paire éphémère par appel).
+- La clé de session (`new_key`) est utilisée comme clé AES.
+- Pour chaque message, un **nonce (IV) aléatoire de 12 octets** est généré.
+- GCM garantit la confidentialité et calcule un **tag d'authentification (16 octets)** assurant l'intégrité des données.
 
-### Clé statique `/public-key`
+Les requêtes `POST /encrypt` et `POST /decrypt` s'exécutent **strictement sur le proxy local** de la VM via HTTP (port 8400).
 
-`GET /public-key` expose encore la clé publique **statique** du trousseau (legacy). Elle **ne sert plus** au flux VM : utiliser `agent_ephemeral_public_key_hex` renvoyé par register, rotate (notification) ou `/ecdh/initiate`.
+## 4. Rotation des Clés Commanditée (Cycle `new_key` / `old_key`)
 
-## 3. Utilisation de la clé : chiffrement / déchiffrement
+L'Agent Central agit en tant que chef d'orchestre pour la rotation via le réseau gRPC mTLS.
 
-Une fois `new_key` connue des deux côtés :
+1. **Ordre Central :** Le Décideur appelle la méthode gRPC `RotateCredentials` sur l'Agent Central (port 5004). L'agent vérifie le certificat client (`CN=decideur`).
+2. **Propagation :** L'Agent Central appelle la méthode gRPC `RotateCredentials` sur chaque proxy connu (port 18400).
+3. **Rotation Locale (Sur le proxy) :**
+    - Le proxy génère une **nouvelle paire éphémère proxy** + effectue ECDH avec la `public_key` VM (toujours la même).
+    - L'ancienne `new_key` est archivée en tant que `old_key` (début du timer de grâce).
+    - Le nouveau secret ECDH devient la nouvelle `new_key`.
+4. **Notification :** Le proxy notifie l'application VM (via appel HTTP sur `url_notification`) pour qu'elle dérive sa nouvelle clé.
 
-- Clé : 32 octets (`new_key` décodée depuis hex)
-- Nonce (IV) : 12 octets aléatoires par message
-- AES-256-GCM : ciphertext + tag d’authentification (16 octets)
-
-GCM apporte confidentialité et intégrité (scénario G de la simulation).
-
-## 4. Rotation : cycle `new_key` / `old_key`
-
-Lors de `POST /credential/rotate` :
-
-1. **Nouvelle paire éphémère agent** + ECDH avec la `public_key` VM inchangée
-2. Ancienne `new_key` → `old_key` (timer de grâce)
-3. Nouveau secret ECDH → nouvelle `new_key`
-4. `agent_public_key` mis à jour dans `session.json`
-5. Notification HTTP (si URL) : `agent_ephemeral_public_key_hex` + `new_key_hex`
-
-## 5. Chiffrement applicatif (`POST /encrypt` / `POST /decrypt`)
-
-Corps minimal :
-
-```json
-{ "vm_id": 101, "plaintext": "..." }
-{ "vm_id": 101, "ciphertext": "...", "iv": "...", "auth_tag": "..." }
-```
-
-- **Encrypt** : utilise toujours la `new_key` active de la VM.
-- **Decrypt** : essaie `new_key` ; en cas d’échec GCM, essaie `old_key` si encore valide (`old_key_grace_sec`).
-- Réponse decrypt : champ `key_used` = `"new"` ou `"old"`.
-
-Le trousseau interne (`blobs_store.json`) reste pour d’autres usages legacy, pas pour ces endpoints HTTP.
-
-## 6. Sécurité
+## 5. Propriétés de Sécurité et Garanties
 
 | Mécanisme | Rôle |
 |-----------|------|
-| X25519 éphémère par session/rotation | Forward secrecy partielle : compromission future de la clé statique agent n’expose pas les secrets passés dérivés d’anciennes paires éphémères |
-| ECDH | Secret partagé calculé localement ; pas d’envoi de la clé AES sur le réseau |
-| AES-256-GCM | Confidentialité + intégrité |
-| Clé privée VM / privée éphémère agent | Ne quittent pas leur hôte ; seules les clés publiques circulent |
-| Pas de log des secrets | `new_key`, secrets ECDH non loggués |
-
-Un attaquant passif voit les clés publiques (VM + éphémère agent) mais ne dérive pas le secret sans une clé privée correspondante.
-
-## Résumé
-
-La clé AES d’une VM est le résultat d’un ECDH avec une **paire X25519 éphémère générée à chaque** `POST /vm/session/register`, `POST /credential/rotate` et `POST /ecdh/initiate`. La VM utilise `agent_ephemeral_public_key_hex` (réponse HTTP ou `session.json`) pour retrouver le même `new_key`.
+| **Architecture Distribuée** | L'Agent central (exposé aux autres agents via gRPC) ne manipule ni ne stocke les clés de chiffrement de données AES. |
+| **mTLS CN Validation** | L'identité des agents sur le réseau gRPC est garantie par une vérification cryptographique stricte du Common Name (ex: `CN=proxy`, `CN=decideur`). |
+| **X25519 éphémère (Forward Secrecy)** | La génération d'une paire éphémère à chaque enregistrement/rotation garantit que même si l'appareil est compromis dans le futur, les communications passées (s'appuyant sur des clés éphémères effacées) restent sécurisées. |
+| **Zéro Transport de Clés Privées** | Les clés privées (`priv_VM`, `priv_éphémère_proxy`) ne quittent jamais leur hôte respectif. Seules les clés publiques circulent sur le réseau. |
+| **Zeroize** | Les buffers en RAM contenant les secrets et les clés privées sont explicitement écrasés de zéros avant libération mémoire. |

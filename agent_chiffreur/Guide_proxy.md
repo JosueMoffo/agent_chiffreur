@@ -1,68 +1,84 @@
 # Guide — Proxy Chiffreur (`proxy_chiffreur/`)
 
-Le dépôt est scindé en deux crates au même niveau :
+Le système est scindé en deux crates déployés à des endroits différents de l'infrastructure :
 
-| Composant | Dossier | Port | Rôle |
-|-----------|---------|------|------|
-| **Agent central** | `agent_chiffreur/` | **5004** (gRPC mTLS) | SMA : Décideur + Auditeur ; registre proxies |
-| **Proxy VM** | `proxy_chiffreur/` | **8400** HTTP + **18400** gRPC | Crypto VM, relais inter-proxy **HTTP** |
+| Composant | Emplacement | Ports | Rôle |
+|-----------|-------------|-------|------|
+| **Agent central** (`agent_chiffreur`) | Conteneur central | **5004 (gRPC)** | Registre des proxies, interface (mTLS) avec l'agent Décideur et Auditeur, orchestration des ordres de rotation gRPC. |
+| **Proxy VM** (`proxy_chiffreur`) | Chaque VM du cluster | **8400 (HTTP)**<br>**18400 (gRPC)** | Toute la logique de chiffrement/déchiffrement local (HTTP), gestion des sessions ECDH, relais inter-VM, écoute des ordres de rotation gRPC. |
 
-## Architecture
+## Architecture : le proxy comme véritable moteur crypto hybride
 
+```text
+┌────────────────────────────────────────────────────────┐
+│                      Agent Central                     │
+│                        (Port 5004)                     │
+│ [Registre] ◄────── [Ordres de rotation du Décideur]   │
+└──────────────────────┬─────────────────────────────────┘
+                       │
+          (gRPC: RotateCredentials())
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│                      Proxy de la VM                    │
+│                 (Port gRPC mTLS 18400)                 │
+│                                                        │
+│  [Moteur AES-GCM] ─── [Échange ECDH éphémère X25519]   │
+│  [Stockage Clés] ──── [Relais Inter-VM]                │
+│                                                        │
+│                  (Port HTTP REST 8400)                 │
+└──────────────────────┬─────────────────────────────────┘
+                       │
+     (POST /encrypt, POST /decrypt, POST /vm/session/register)
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│                   Application de la VM                 │
+└────────────────────────────────────────────────────────┘
 ```
-Décideur :5003 ──gRPC mTLS RotateCredentials──► Agent central :5004
-Agent central ──gRPC mTLS PublishEvent──► Auditeur :5005
-                ▲ gRPC AnnounceProxy / SyncVm (CN=proxy)
-Proxy :18400 gRPC ─┘
-Proxy :8400 HTTP  ──► relais inter-proxy + applications VM
-```
-
-Le proxy n’appelle pas le Décideur ni l’Auditeur : seul l’agent central est sur le bus SMA.
 
 ## Démarrage
 
 ```bash
-# 1. Agent central (une fois par datacenter)
-cd agent_chiffreur && ./install.sh
-
-# 2. Proxy sur chaque VM
-cd ../proxy_chiffreur
+# 1. Copier la PKI dans /etc/gandal/pki/ sur la VM (pour le gRPC)
+# 2. Installer le proxy sur la VM
+cd proxy_chiffreur
 PROXY_CONFIG=config/proxy_config.101.json ./install.sh
 ```
 
-## Fichiers proxy
+## Fichiers proxy locaux
 
 | Fichier | Description |
 |---------|-------------|
-| `config/proxy_config.json` | `local_vm_id`, `listen_port` 8400, `grpc_port` 18400, `agent_central_grpc`, table `peers` (HTTP) |
-| `data/session.json` | Clés AES des VMs enregistrées sur ce proxy |
-| `data/proxy_session.json` | Sessions pair à pair (handshake inter-proxy) |
-| `data/proxy_vm_secret.json` | Clé X25519 locale du proxy |
+| `config/proxy_config.json` | Configure le `local_vm_id`, le port HTTP `8400`, le port gRPC `18400`, l'`agent_central_grpc` (vers le port 5004), et la table `peers`. |
+| `data/session.json` | Contient les clés AES (new_key, old_key) des VMs gérées par ce proxy. |
+| `data/proxy_session.json` | Sessions de proxy à proxy pour le relais de messages. |
+| `data/proxy_vm_secret.json` | Clé privée X25519 du proxy pour son identité P2P. |
 
-Exemples : `config/proxy_config.101.json`, `config/proxy_config.102.json`
+## Endpoints principaux du Proxy
 
-## Endpoints principaux (proxy :8400)
+Le proxy mixe du gRPC sécurisé pour l'administration et du HTTP simple pour les applications locales.
+
+### Interface réseau interne VM (HTTP - Port 8400)
+L'application hébergée sur la VM interagit **exclusivement** avec son proxy local pour la sécurité.
 
 | Méthode | Route | Rôle |
 |---------|-------|------|
-| POST | `/encrypt`, `/decrypt` | Crypto avec clés VM locales |
-| POST | `/vm/session/register` | Enregistrement VM + sync central |
-| POST | `/credential/rotate` | Rotation locale (appelé par l’agent central) |
-| POST | `/proxy/relay` | Relais vers une VM distante (`request` JSON préservé) |
-| POST | `/proxy/inbound` | Réception depuis un proxy pair |
+| POST | `/encrypt`, `/decrypt` | Chiffrement/déchiffrement avec la clé de la session de la VM. |
+| POST | `/vm/session/register` | Initialise l'échange ECDH éphémère et crée la clé de session AES, puis synchronise le registre central via gRPC. |
+| POST | `/proxy/relay` | Demande au proxy d'encapsuler et relayer un message vers une autre VM. |
 
-## Relais inter-VM
+### Interface d'Administration Cluster (gRPC mTLS - Port 18400)
+| Service | RPC | Rôle |
+|---------|-----|------|
+| `ProxyChiffreurService` | `RotateCredentials` | Exécute la rotation (reçoit l'ordre de l'agent central). |
+| `ProxyChiffreurService` | `Health` | Sondage de santé. |
 
-```json
-POST /proxy/relay
-{
-  "dest_vm_id": 102,
-  "request": { "...": "corps JSON original de l'app VM, inchangé" }
-}
-```
+## Processus de Rotation
 
-Le proxy chiffre le champ `request` pour le transport, le proxy cible déchiffre et transmet à `local_deliver_url` sans altérer la structure.
-
-## Rotation
-
-Seul le **Décideur** déclenche `POST /credential/rotate` sur le port **5004** avec **`X-Agent-Token`**. L’agent propage la rotation à chaque proxy (également protégé par token), puis journalise sur l’auditeur (`POST /events`).
+1. Le Décideur ordonne une rotation via gRPC `RotateCredentials` sur `http://<agent_central>:5004` (authentifié avec `CN=decideur`).
+2. L'Agent central identifie tous les proxies connus dans son registre.
+3. L'Agent central relaie l'ordre en appelant gRPC `RotateCredentials` sur chaque proxy (`<proxy_vm>:18400`).
+4. **Le proxy** génère de nouvelles paires ECDH éphémères, archive les `old_key`, installe les `new_key`.
+5. **Le proxy** notifie les applications locales (via `url_notification` HTTP).
+6. L'Agent central consolide les résultats et envoie un résumé gRPC à l'Agent Auditeur.
