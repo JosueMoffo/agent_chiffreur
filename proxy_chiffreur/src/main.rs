@@ -29,7 +29,7 @@ async fn main() {
     let (state, http_port) = preparer_proxy(config.clone(), activer_purge).await;
     let state_grpc = Arc::clone(&state);
 
-    let proxy_http_url = format!("http://127.0.0.1:{http_port}");
+    let proxy_http_url = format!("http://{}:{http_port}", config.advertise_host);
     let proxy_grpc_addr = config.grpc_advertise_addr();
 
     match state.central.annoncer_proxy(

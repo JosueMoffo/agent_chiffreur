@@ -4,6 +4,7 @@
   "listen_port": 8400,
   "grpc_port": 18400,
   "grpc_listen_host": "0.0.0.0",
+  "advertise_host": "127.0.0.1",
   "agent_central_grpc": "127.0.0.1:5004",
   "agent_token": "REMPLACER_PAR_LE_MEME_TOKEN_QUE_L_AGENT_CENTRAL",
   "chemin_session": "data/session.json",

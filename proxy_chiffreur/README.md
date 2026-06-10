@@ -25,6 +25,8 @@ Depuis la migration gRPC, le proxy opère en mode hybride avec deux interfaces r
 cp config/proxy_config.example.json config/proxy_config.101.json
 
 # Ajuster "agent_central_grpc" pour pointer vers l'Agent Central (ex: "192.168.123.110:5004")
+# Ajuster "advertise_host" avec l'adresse IP de cette VM sur le LAN (ex: "192.168.123.50")
+# Sinon, l'Agent Central ne pourra pas vous contacter pour la rotation !
 
 # 3. Installation et démarrage
 PROXY_CONFIG=config/proxy_config.101.json ./install.sh
