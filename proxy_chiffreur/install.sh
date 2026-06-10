@@ -144,6 +144,13 @@ if [[ ! -f "${PROXY_CONFIG}" ]] && [[ -f config/proxy_config.example.json ]]; th
 fi
 [[ -f "${PROXY_CONFIG}" ]] || error "Fichier config absent : ${PROXY_CONFIG}"
 
+# Auto-détection de l'IP LAN pour la mise en production
+MON_IP=$(ip route get 1 2>/dev/null | awk '{print $7;exit}')
+if [[ -n "${MON_IP}" ]] && grep -q '"advertise_host": "127.0.0.1"' "${PROXY_CONFIG}"; then
+    sed -i "s/\"advertise_host\": \"127.0.0.1\"/\"advertise_host\": \"${MON_IP}\"/g" "${PROXY_CONFIG}"
+    info "IP LAN détectée : ${MON_IP} — Configuration JSON mise à jour."
+fi
+
 section "Prérequis"
 command -v cargo >/dev/null 2>&1 || error "Cargo requis ou utilisez --deb."
 
